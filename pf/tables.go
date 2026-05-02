@@ -37,7 +37,15 @@ func (c *Client) CreateTable(table Table) error {
 	ct := cPfrTable(table)
 	ct.pfrt_flags |= C.u_int32_t(TableFlagPersist)
 	pt.pfrio_table = ct
-	pt.pfrio_buffer = unsafe.Pointer(&ct)
+
+	buf := C.malloc(C.size_t(C.sizeof_struct_pfr_table))
+	if buf == nil {
+		return &OpError{Op: "CreateTable", Err: ErrInvalidArgument}
+	}
+	defer C.free(buf)
+	C.memcpy(buf, unsafe.Pointer(&ct), C.sizeof_struct_pfr_table)
+
+	pt.pfrio_buffer = buf
 	pt.pfrio_esize = C.int(C.sizeof_struct_pfr_table)
 	pt.pfrio_size = 1
 
@@ -59,8 +67,18 @@ func (c *Client) DeleteTable(table Table) error {
 	var pt C.struct_pfioc_table
 	C.memset(unsafe.Pointer(&pt), 0, C.sizeof_struct_pfioc_table)
 
-	ct := cPfrTable(table)
-	pt.pfrio_buffer = unsafe.Pointer(&ct)
+	// Strip flags for delete — kernel rejects non-zero flags
+	tblRef := Table{Name: table.Name, Anchor: table.Anchor}
+	ct := cPfrTable(tblRef)
+
+	buf := C.malloc(C.size_t(C.sizeof_struct_pfr_table))
+	if buf == nil {
+		return &OpError{Op: "DeleteTable", Err: ErrInvalidArgument}
+	}
+	defer C.free(buf)
+	C.memcpy(buf, unsafe.Pointer(&ct), C.sizeof_struct_pfr_table)
+
+	pt.pfrio_buffer = buf
 	pt.pfrio_esize = C.int(C.sizeof_struct_pfr_table)
 	pt.pfrio_size = 1
 
@@ -184,7 +202,8 @@ func (c *Client) ListTableAddresses(table Table) ([]TableAddress, error) {
 	var pt C.struct_pfioc_table
 	C.memset(unsafe.Pointer(&pt), 0, C.sizeof_struct_pfioc_table)
 
-	pt.pfrio_table = cPfrTable(table)
+	tblRef := Table{Name: table.Name, Anchor: table.Anchor}
+	pt.pfrio_table = cPfrTable(tblRef)
 	pt.pfrio_esize = C.int(C.sizeof_struct_pfr_addr)
 
 	// First call: get count
@@ -236,10 +255,18 @@ func (c *Client) TestTableAddress(table Table, addr net.IP) (bool, error) {
 	ta := TableAddress{IP: addr}
 	ca := cPfrAddr(ta)
 
+	buf := C.malloc(C.size_t(C.sizeof_struct_pfr_addr))
+	if buf == nil {
+		return false, &OpError{Op: "TestTableAddress", Err: ErrInvalidArgument}
+	}
+	defer C.free(buf)
+	C.memcpy(buf, unsafe.Pointer(&ca), C.sizeof_struct_pfr_addr)
+
 	var pt C.struct_pfioc_table
 	C.memset(unsafe.Pointer(&pt), 0, C.sizeof_struct_pfioc_table)
-	pt.pfrio_table = cPfrTable(table)
-	pt.pfrio_buffer = unsafe.Pointer(&ca)
+	tblRef := Table{Name: table.Name, Anchor: table.Anchor}
+	pt.pfrio_table = cPfrTable(tblRef)
+	pt.pfrio_buffer = buf
 	pt.pfrio_esize = C.int(C.sizeof_struct_pfr_addr)
 	pt.pfrio_size = 1
 
@@ -248,7 +275,8 @@ func (c *Client) TestTableAddress(table Table, addr net.IP) (bool, error) {
 	}
 
 	// After DIOCRTSTADDRS, pfra_fback indicates match
-	return ca.pfra_fback == C.PFR_FB_MATCH, nil
+	result := (*C.struct_pfr_addr)(buf)
+	return result.pfra_fback == C.PFR_FB_MATCH, nil
 }
 
 // FlushTable removes all addresses from a PF table.
@@ -265,7 +293,8 @@ func (c *Client) FlushTable(table Table) error {
 
 	var pt C.struct_pfioc_table
 	C.memset(unsafe.Pointer(&pt), 0, C.sizeof_struct_pfioc_table)
-	pt.pfrio_table = cPfrTable(table)
+	tblRef := Table{Name: table.Name, Anchor: table.Anchor}
+	pt.pfrio_table = cPfrTable(tblRef)
 
 	return ioctlTableClrAddrs(c.fd, &pt)
 }
@@ -273,17 +302,28 @@ func (c *Client) FlushTable(table Table) error {
 type tableIoctlFunc func(int, *C.struct_pfioc_table) error
 
 func (c *Client) tableAddrOp(fn tableIoctlFunc, table Table, addrs []TableAddress) error {
-	cAddrs := make([]C.struct_pfr_addr, len(addrs))
+	n := len(addrs)
+	bufSize := C.size_t(n) * C.size_t(C.sizeof_struct_pfr_addr)
+	buf := C.malloc(bufSize)
+	if buf == nil {
+		return &OpError{Op: "tableAddrOp", Err: ErrInvalidArgument}
+	}
+	defer C.free(buf)
+
 	for i, a := range addrs {
-		cAddrs[i] = cPfrAddr(a)
+		ca := cPfrAddr(a)
+		dst := unsafe.Add(buf, i*int(C.sizeof_struct_pfr_addr))
+		C.memcpy(dst, unsafe.Pointer(&ca), C.sizeof_struct_pfr_addr)
 	}
 
 	var pt C.struct_pfioc_table
 	C.memset(unsafe.Pointer(&pt), 0, C.sizeof_struct_pfioc_table)
-	pt.pfrio_table = cPfrTable(table)
-	pt.pfrio_buffer = unsafe.Pointer(&cAddrs[0])
+	// For address operations, only set name/anchor — not flags
+	tblRef := Table{Name: table.Name, Anchor: table.Anchor}
+	pt.pfrio_table = cPfrTable(tblRef)
+	pt.pfrio_buffer = buf
 	pt.pfrio_esize = C.int(C.sizeof_struct_pfr_addr)
-	pt.pfrio_size = C.int(len(addrs))
+	pt.pfrio_size = C.int(n)
 
 	return fn(c.fd, &pt)
 }
