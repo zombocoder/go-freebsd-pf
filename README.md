@@ -1,5 +1,10 @@
 # go-freebsd-pf
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/zombocoder/go-freebsd-pf.svg)](https://pkg.go.dev/github.com/zombocoder/go-freebsd-pf)
+[![FreeBSD](https://img.shields.io/badge/platform-FreeBSD-red.svg)](https://www.freebsd.org/)
+[![Go Version](https://img.shields.io/badge/go-%3E%3D1.22-blue.svg)](https://golang.org/)
+[![License](https://img.shields.io/badge/license-BSD--2--Clause-green.svg)](LICENSE)
+
 A Go library for managing the FreeBSD PF (Packet Filter) firewall via /dev/pf ioctls.
 
 This library provides a native Go interface to PF's kernel-level ioctl API, enabling programmatic control of firewall rules, tables, state tracking, and configuration from Go applications.
