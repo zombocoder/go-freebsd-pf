@@ -144,6 +144,11 @@ type Rule struct {
 	Anchor    string
 
 	Nr uint32 // rule number (read-only, set by kernel)
+
+	// Per-rule statistics (read-only, populated by ListRules).
+	Evaluations uint64
+	Packets     [2]uint64 // [in, out]
+	Bytes       [2]uint64 // [in, out]
 }
 
 // AddressFamily represents the address family.
@@ -197,7 +202,7 @@ func (d DebugLevel) String() string {
 	}
 }
 
-// Status holds PF status information.
+// Status holds PF status information, equivalent to `pfctl -s info`.
 type Status struct {
 	Running    bool
 	Since      time.Time
@@ -207,15 +212,48 @@ type Status struct {
 	States     uint32
 	SrcNodes   uint32
 	Counters   StatusCounters
+	StateTable StateTableCounters
 	Checksum   [16]byte
 }
 
-// StatusCounters holds various PF counters.
+// StatusCounters holds PF packet match counters (the "Counters" section
+// of `pfctl -s info`).
 type StatusCounters struct {
-	Counters  []uint64
-	LCounters []uint64
-	FCounters []uint64
-	SCounters []uint64
+	Match          uint64
+	BadOffset      uint64
+	Fragment       uint64
+	Short          uint64
+	Normalize      uint64
+	Memory         uint64
+	BadTimestamp   uint64
+	Congestion     uint64
+	IPOption       uint64
+	ProtoChecksum  uint64
+	StateMismatch  uint64
+	StateInsert    uint64
+	StateLimit     uint64
+	SrcLimit       uint64
+	SynProxy       uint64
+	MapFailed      uint64
+}
+
+// StateTableCounters holds state table search/insert/removal counters
+// (the "State Table" section of `pfctl -s info`).
+type StateTableCounters struct {
+	Searches uint64
+	Inserts  uint64
+	Removals uint64
+}
+
+// LimitCounters holds limit-related counters.
+type LimitCounters struct {
+	States        uint64
+	SrcStates     uint64
+	SrcNodes      uint64
+	SrcConn       uint64
+	SrcConnRate   uint64
+	OverloadTable uint64
+	OverloadFlush uint64
 }
 
 // TableFlags represents PF table flags.

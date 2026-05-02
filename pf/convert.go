@@ -186,6 +186,13 @@ func ruleFromC(pr *C.struct_pfioc_rule) Rule {
 	r.Label = strings.TrimRight(C.GoString(&rule.label[0]), "\x00")
 	r.Anchor = strings.TrimRight(C.GoString(&pr.anchor[0]), "\x00")
 
+	// Per-rule statistics
+	r.Evaluations = uint64(rule.evaluations)
+	r.Packets[0] = uint64(rule.packets[0])
+	r.Packets[1] = uint64(rule.packets[1])
+	r.Bytes[0] = uint64(rule.bytes[0])
+	r.Bytes[1] = uint64(rule.bytes[1])
+
 	return r
 }
 

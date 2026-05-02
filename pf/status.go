@@ -81,25 +81,31 @@ func convertStatus(cs *C.struct_pf_status) *Status {
 	// Copy interface name
 	s.Interface = C.GoString(&cs.ifname[0])
 
-	// Copy counters
-	s.Counters.Counters = make([]uint64, C.PFRES_MAX)
-	for i := 0; i < int(C.PFRES_MAX); i++ {
-		s.Counters.Counters[i] = uint64(cs.counters[i])
+	// Counters (PFRES_* — the "Counters" section of pfctl -s info)
+	s.Counters = StatusCounters{
+		Match:         uint64(cs.counters[C.PFRES_MATCH]),
+		BadOffset:     uint64(cs.counters[C.PFRES_BADOFF]),
+		Fragment:      uint64(cs.counters[C.PFRES_FRAG]),
+		Short:         uint64(cs.counters[C.PFRES_SHORT]),
+		Normalize:     uint64(cs.counters[C.PFRES_NORM]),
+		Memory:        uint64(cs.counters[C.PFRES_MEMORY]),
+		BadTimestamp:  uint64(cs.counters[C.PFRES_TS]),
+		Congestion:    uint64(cs.counters[C.PFRES_CONGEST]),
+		IPOption:      uint64(cs.counters[C.PFRES_IPOPTIONS]),
+		ProtoChecksum: uint64(cs.counters[C.PFRES_PROTCKSUM]),
+		StateMismatch: uint64(cs.counters[C.PFRES_BADSTATE]),
+		StateInsert:   uint64(cs.counters[C.PFRES_STATEINS]),
+		StateLimit:    uint64(cs.counters[C.PFRES_MAXSTATES]),
+		SrcLimit:      uint64(cs.counters[C.PFRES_SRCLIMIT]),
+		SynProxy:      uint64(cs.counters[C.PFRES_SYNPROXY]),
+		MapFailed:     uint64(cs.counters[C.PFRES_MAPFAILED]),
 	}
 
-	s.Counters.LCounters = make([]uint64, C.LCNT_MAX)
-	for i := 0; i < int(C.LCNT_MAX); i++ {
-		s.Counters.LCounters[i] = uint64(cs.lcounters[i])
-	}
-
-	s.Counters.FCounters = make([]uint64, C.FCNT_MAX)
-	for i := 0; i < int(C.FCNT_MAX); i++ {
-		s.Counters.FCounters[i] = uint64(cs.fcounters[i])
-	}
-
-	s.Counters.SCounters = make([]uint64, C.SCNT_MAX)
-	for i := 0; i < int(C.SCNT_MAX); i++ {
-		s.Counters.SCounters[i] = uint64(cs.scounters[i])
+	// State table counters (FCNT_* — the "State Table" section)
+	s.StateTable = StateTableCounters{
+		Searches: uint64(cs.fcounters[C.FCNT_STATE_SEARCH]),
+		Inserts:  uint64(cs.fcounters[C.FCNT_STATE_INSERT]),
+		Removals: uint64(cs.fcounters[C.FCNT_STATE_REMOVALS]),
 	}
 
 	// Copy checksum

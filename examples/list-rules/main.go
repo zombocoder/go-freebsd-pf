@@ -51,6 +51,9 @@ func main() {
 		fmt.Printf("  Quick:     %v\n", r.Quick)
 		fmt.Printf("  Log:       %v\n", r.Log)
 		fmt.Printf("  Label:     %s\n", r.Label)
+		fmt.Printf("  Evaluations: %d\n", r.Evaluations)
+		fmt.Printf("  Packets:   [in: %d, out: %d]\n", r.Packets[0], r.Packets[1])
+		fmt.Printf("  Bytes:     [in: %s, out: %s]\n", formatBytes(r.Bytes[0]), formatBytes(r.Bytes[1]))
 		fmt.Println()
 	}
 }
@@ -79,4 +82,17 @@ func formatPort(pm pf.PortMatcher) string {
 		return fmt.Sprintf("= %d", pm.From)
 	}
 	return fmt.Sprintf("op=%d from=%d to=%d", pm.Operator, pm.From, pm.To)
+}
+
+func formatBytes(b uint64) string {
+	switch {
+	case b >= 1<<30:
+		return fmt.Sprintf("%.1f GB", float64(b)/float64(1<<30))
+	case b >= 1<<20:
+		return fmt.Sprintf("%.1f MB", float64(b)/float64(1<<20))
+	case b >= 1<<10:
+		return fmt.Sprintf("%.1f KB", float64(b)/float64(1<<10))
+	default:
+		return fmt.Sprintf("%d B", b)
+	}
 }
