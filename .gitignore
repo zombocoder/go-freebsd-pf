@@ -1,0 +1,36 @@
+# Binaries
+*.o
+*.a
+*.so
+*.dylib
+
+# Go build output
+/bin/
+/dist/
+
+# Example binaries
+examples/enable-disable/enable-disable
+examples/status/status
+examples/list-rules/list-rules
+examples/add-block-rule/add-block-rule
+examples/tables/tables
+examples/clear-states/clear-states
+examples/transaction/transaction
+
+# Test binary
+*.test
+
+# Go workspace
+go.work
+go.work.sum
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db

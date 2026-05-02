@@ -1,0 +1,159 @@
+# go-freebsd-pf
+
+A Go library for managing the FreeBSD PF (Packet Filter) firewall via /dev/pf ioctls.
+
+This library provides a native Go interface to PF's kernel-level ioctl API, enabling programmatic control of firewall rules, tables, state tracking, and configuration from Go applications.
+
+**This library only works on FreeBSD.** It requires cgo and root privileges.
+
+## Requirements
+
+- FreeBSD 13.2 or later (14.0+ recommended for full feature support)
+- Go 1.22 or later
+- cgo enabled (CGO_ENABLED=1)
+- Root privileges (or appropriate /dev/pf permissions)
+- A C compiler (clang is included in the FreeBSD base system)
+
+## Installation
+
+```
+go get github.com/zombocoder/go-freebsd-pf
+```
+
+## Quick Start
+
+```go
+package main
+
+import (
+    "fmt"
+    "log"
+
+    "github.com/zombocoder/go-freebsd-pf/pf"
+)
+
+func main() {
+    client, err := pf.OpenDefault()
+    if err != nil {
+        log.Fatal("Failed to open PF: ", err)
+    }
+    defer client.Close()
+
+    status, err := client.Status()
+    if err != nil {
+        log.Fatal("Failed to get status: ", err)
+    }
+
+    fmt.Printf("PF running: %v\n", status.Running)
+    fmt.Printf("Active states: %d\n", status.States)
+}
+```
+
+## Features
+
+- **Enable/Disable PF** -- Start and stop the packet filter
+- **Status** -- Query PF status, counters, and debug level
+- **Rules** -- List, add, and manage filter rules with full support for addresses, ports, protocols, and options
+- **Tables** -- Create, delete, and manage PF tables and their address entries
+- **States** -- List, clear, and kill state table entries with filtering support
+- **Transactions** -- Atomic ruleset replacement via DIOCXBEGIN/DIOCXCOMMIT/DIOCXROLLBACK
+- **Anchors** -- Operate on rules within named anchors
+- **Address families** -- IPv4 and IPv6 support
+- **Validation** -- Rule validation before submission to the kernel
+
+## Supported FreeBSD Versions
+
+| Version | Support Level |
+|---------|--------------|
+| 13.2    | Supported (no state listing via DIOCGETSTATESV2) |
+| 13.3    | Supported (no state listing via DIOCGETSTATESV2) |
+| 14.0    | Full support |
+| 14.1    | Full support |
+| 14.2    | Full support |
+| 14.3    | Full support |
+
+See `docs/compatibility.md` for detailed ioctl availability by version.
+
+## Safety Warning
+
+This library directly controls the operating system's firewall. Incorrect usage can lock you out of a remote system or expose it to unwanted traffic. In particular:
+
+- Adding a "block all" rule without a preceding "pass" rule for your management connection will lock you out.
+- Committing an empty ruleset will remove all existing rules.
+- Disabling PF removes all packet filtering.
+
+Test changes on a local or easily recoverable system before deploying to production. Use transactions to apply rulesets atomically -- if something goes wrong during rule addition, roll back.
+
+## Building and Testing
+
+Verify you are on FreeBSD:
+
+```
+make freebsd-check
+```
+
+Run the linter and vet:
+
+```
+make lint
+make vet
+```
+
+Run unit tests:
+
+```
+make test
+```
+
+Run integration tests (requires root and a running PF instance):
+
+```
+make test-integration
+```
+
+Build all examples:
+
+```
+make examples
+```
+
+Examples are located in the `examples/` directory:
+
+- `examples/status` -- Query and display PF status
+- `examples/enable-disable` -- Enable and disable PF
+- `examples/list-rules` -- List active filter rules
+- `examples/add-block-rule` -- Add a block rule via transaction
+- `examples/tables` -- Create and manage PF tables
+- `examples/clear-states` -- Clear the state table
+- `examples/transaction` -- Demonstrate atomic ruleset replacement
+
+## Project Structure
+
+```
+pf/                  Public API and implementation
+  client.go          Client type, Open/Close
+  types.go           Go type definitions (Rule, Table, State, etc.)
+  status.go          Enable, Disable, Status operations
+  rules.go           Rule listing and management
+  tables.go          Table and table address operations
+  states.go          State listing and killing
+  transaction.go     Atomic ruleset transactions
+  convert.go         Go <-> C struct conversion
+  cgo_freebsd.go     cgo bindings and C helper functions
+  validate.go        Rule validation
+  errors.go          Error types and mapping
+  unsupported.go     Stub for non-FreeBSD builds
+docs/                Design and technical documentation
+examples/            Runnable example programs
+internal/            Internal test utilities
+```
+
+## Documentation
+
+- `docs/design.md` -- Architecture and design decisions
+- `docs/pf-ioctl-notes.md` -- Technical notes on each PF ioctl used
+- `docs/compatibility.md` -- FreeBSD version compatibility matrix
+
+## License
+
+BSD 2-Clause License. See LICENSE file.
