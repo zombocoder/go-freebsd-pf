@@ -13,7 +13,10 @@ package pf
 #include <string.h>
 */
 import "C"
-import "unsafe"
+import (
+	"syscall"
+	"unsafe"
+)
 
 // ListRules retrieves the rules matching the given query.
 func (c *Client) ListRules(query RuleQuery) ([]Rule, error) {
@@ -32,6 +35,12 @@ func (c *Client) ListRules(query RuleQuery) ([]Rule, error) {
 	pr.rule.action = C.u_int8_t(query.RuleSet)
 
 	if err := ioctlGetRules(c.fd, &pr); err != nil {
+		// The kernel answers EINVAL for an anchor that does not exist
+		// (pf_ioctl_getrules); committing an empty ruleset removes the
+		// anchor, so report it as empty, as pfctl -a does.
+		if query.Anchor != "" && isErrno(err, syscall.EINVAL) {
+			return nil, nil
+		}
 		return nil, err
 	}
 

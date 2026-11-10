@@ -16,6 +16,7 @@ package pf
 import "C"
 import (
 	"net"
+	"syscall"
 	"unsafe"
 )
 
@@ -105,6 +106,10 @@ func (c *Client) ListTables(anchor string) ([]Table, error) {
 	pt.pfrio_size = 0
 	pt.pfrio_buffer = nil
 	if err := ioctlTableGet(c.fd, &pt); err != nil {
+		// EINVAL: the anchor does not exist (pfr_table_count < 0).
+		if anchor != "" && isErrno(err, syscall.EINVAL) {
+			return nil, nil
+		}
 		return nil, err
 	}
 

@@ -97,3 +97,9 @@ func compatUnsupported(err error) error {
 	}
 	return &OpError{Op: opErr.Op, Errno: opErr.Errno, Err: ErrNotSupported}
 }
+
+// isErrno reports whether err is an *OpError for the given errno.
+func isErrno(err error, errno syscall.Errno) bool {
+	var opErr *OpError
+	return errors.As(err, &opErr) && opErr.Errno == errno
+}

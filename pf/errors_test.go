@@ -148,3 +148,16 @@ func TestCompatUnsupported(t *testing.T) {
 		}
 	})
 }
+
+func TestIsErrno(t *testing.T) {
+	err := fmt.Errorf("wrapped: %w", mapErrno("DIOCGETRULES", syscall.EINVAL))
+	if !isErrno(err, syscall.EINVAL) {
+		t.Fatal("expected EINVAL to be found through the sentinel mapping")
+	}
+	if isErrno(err, syscall.ENOENT) {
+		t.Fatal("unexpected ENOENT match")
+	}
+	if isErrno(fmt.Errorf("plain"), syscall.EINVAL) {
+		t.Fatal("plain error must not match")
+	}
+}
