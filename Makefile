@@ -87,7 +87,7 @@ vet: ## Run go vet (including the integration tests)
 	@$(GOVET) ./...
 	@$(GOVET) -tags integration ./...
 
-check: fmt vet ## Run fmt and vet
+check: fmt-check vet ## Check formatting (no changes) and run vet
 
 lint: ## Run static analysis (requires staticcheck)
 	@echo "Running staticcheck..."
