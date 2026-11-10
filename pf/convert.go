@@ -380,13 +380,16 @@ func cPfrAddr(ta TableAddress) C.struct_pfr_addr {
 // stateFromC converts a C pf_state_export to a Go State.
 func stateFromC(cs *C.struct_pf_state_export) State {
 	s := State{
-		ID:        uint64(cs.id),
-		CreatorID: uint32(cs.creatorid),
-		Interface: strings.TrimRight(C.GoString(&cs.ifname[0]), "\x00"),
-		Protocol:  Protocol(cs.proto),
-		AF:        AddressFamily(cs.af),
-		Creation:  time.Duration(cs.creation) * time.Second,
-		Expire:    time.Duration(cs.expire) * time.Second,
+		ID:            be64toh(uint64(cs.id)),
+		CreatorID:     ntohl(uint32(cs.creatorid)),
+		Interface:     strings.TrimRight(C.GoString(&cs.ifname[0]), "\x00"),
+		OrigInterface: strings.TrimRight(C.GoString(&cs.orig_ifname[0]), "\x00"),
+		Protocol:      Protocol(cs.proto),
+		AF:            AddressFamily(cs.af),
+		// pf_state_export(): id, creatorid, creation and expire are
+		// stored in network byte order.
+		Creation: time.Duration(ntohl(uint32(cs.creation))) * time.Second,
+		Expire:   time.Duration(ntohl(uint32(cs.expire))) * time.Second,
 	}
 
 	switch cs.direction {
@@ -404,19 +407,22 @@ func stateFromC(cs *C.struct_pf_state_export) State {
 	// pf_state_key_export has addr[2] (pf_addr) and port[2]
 	// Access through raw bytes since cgo represents unions as byte arrays
 	addrBytes := (*[32]byte)(unsafe.Pointer(&wireKey.addr[0]))
+	var addrs [2]net.IP
 	switch cs.af {
 	case C.AF_INET:
-		s.Source = net.IPv4(addrBytes[0], addrBytes[1], addrBytes[2], addrBytes[3])
-		s.Destination = net.IPv4(addrBytes[16], addrBytes[17], addrBytes[18], addrBytes[19])
+		addrs[0] = net.IPv4(addrBytes[0], addrBytes[1], addrBytes[2], addrBytes[3])
+		addrs[1] = net.IPv4(addrBytes[16], addrBytes[17], addrBytes[18], addrBytes[19])
 	case C.AF_INET6:
-		s.Source = make(net.IP, 16)
-		copy(s.Source, addrBytes[0:16])
-		s.Destination = make(net.IP, 16)
-		copy(s.Destination, addrBytes[16:32])
+		addrs[0] = make(net.IP, 16)
+		copy(addrs[0], addrBytes[0:16])
+		addrs[1] = make(net.IP, 16)
+		copy(addrs[1], addrBytes[16:32])
 	}
-
-	s.SourcePort = ntohs(C.u_int16_t(wireKey.port[0]))
-	s.DestPort = ntohs(C.u_int16_t(wireKey.port[1]))
+	ports := [2]uint16{
+		ntohs(C.u_int16_t(wireKey.port[0])),
+		ntohs(C.u_int16_t(wireKey.port[1])),
+	}
+	s.Source, s.Destination, s.SourcePort, s.DestPort = orientWireKey(s.Direction, addrs, ports)
 
 	s.Packets[0] = uint64(cs.packets[0])
 	s.Packets[1] = uint64(cs.packets[1])

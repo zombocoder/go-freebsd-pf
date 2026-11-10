@@ -104,17 +104,3 @@ func (c *Client) KillStates(filter StateFilter) (int, error) {
 
 	return int(psk.psk_killed), nil
 }
-
-// matchesFilter checks if a state matches the given filter criteria.
-func matchesFilter(s State, f StateFilter) bool {
-	if f.Interface != "" && s.Interface != f.Interface {
-		return false
-	}
-	if f.Source != nil && !f.Source.Contains(s.Source) {
-		return false
-	}
-	if f.Destination != nil && !f.Destination.Contains(s.Destination) {
-		return false
-	}
-	return true
-}

@@ -82,6 +82,15 @@ func createTap(t *testing.T) string {
 	t.Helper()
 	name := strings.TrimSpace(runCmd(t, "", "ifconfig", "tap", "create"))
 	t.Cleanup(func() { _ = exec.Command("ifconfig", name, "destroy").Run() })
+	// Holding the character device open brings the link up; with "no
+	// carrier" the stack drops output before PF ever sees it.
+	dev, err := os.OpenFile("/dev/"+name, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatalf("open /dev/%s: %v", name, err)
+	}
+	t.Cleanup(func() { dev.Close() })
+	// Runs first: drop any state a failed test left on the tap.
+	t.Cleanup(func() { _ = exec.Command("pfctl", "-i", name, "-F", "states").Run() })
 	runCmd(t, "", "ifconfig", name, "inet", tapLocalCIDR, "up")
 	return name
 }
@@ -339,5 +348,9 @@ func TestListStatesOnInterface(t *testing.T) {
 		!s.Destination.Equal(net.ParseIP(tapPeer)) || s.Direction != DirectionOut {
 		t.Errorf("unexpected state: %+v", s)
 	}
+	if s.OrigInterface != ifname || s.Expire <= 0 || s.Expire > time.Hour {
+		t.Errorf("unexpected interface/expiry: %+v", s)
+	}
+	t.Logf("state: %+v", s)
 	_, _ = c.KillStates(StateFilter{Interface: ifname})
 }
