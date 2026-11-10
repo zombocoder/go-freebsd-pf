@@ -25,14 +25,14 @@ func main() {
 
 	// Block an unused high port — never SSH (22) or anything in use.
 	rule := pf.Rule{
-		Action:    pf.ActionBlock,
-		Direction: pf.DirectionIn,
-		Protocol:  pf.ProtocolTCP,
-		AF:        pf.AddressFamilyIPv4,
-		Quick:     true,
-		KeepState: true,
-		Label:     "block-test-example",
-		Source:    pf.Address{Any: true},
+		Action:      pf.ActionBlock,
+		Direction:   pf.DirectionIn,
+		Protocol:    pf.ProtocolTCP,
+		AF:          pf.AddressFamilyIPv4,
+		Quick:       true,
+		KeepState:   true,
+		Label:       "block-test-example",
+		Source:      pf.Address{Any: true},
 		Destination: pf.Address{Any: true},
 		DestinationPort: pf.PortMatcher{
 			Operator: pf.PortOpEq,

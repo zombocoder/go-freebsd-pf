@@ -32,14 +32,14 @@ func main() {
 
 	// Rule 1: pass in proto tcp to port 65533 (harmless high port)
 	rule1 := pf.Rule{
-		Action:    pf.ActionPass,
-		Direction: pf.DirectionIn,
-		Protocol:  pf.ProtocolTCP,
-		AF:        pf.AddressFamilyIPv4,
-		Quick:     true,
-		KeepState: true,
-		Label:     "allow-test-65533",
-		Source:    pf.Address{Any: true},
+		Action:      pf.ActionPass,
+		Direction:   pf.DirectionIn,
+		Protocol:    pf.ProtocolTCP,
+		AF:          pf.AddressFamilyIPv4,
+		Quick:       true,
+		KeepState:   true,
+		Label:       "allow-test-65533",
+		Source:      pf.Address{Any: true},
 		Destination: pf.Address{Any: true},
 		DestinationPort: pf.PortMatcher{
 			Operator: pf.PortOpEq,
@@ -55,14 +55,14 @@ func main() {
 
 	// Rule 2: block in proto tcp to port 65532 (harmless high port)
 	rule2 := pf.Rule{
-		Action:    pf.ActionBlock,
-		Direction: pf.DirectionIn,
-		Protocol:  pf.ProtocolTCP,
-		AF:        pf.AddressFamilyIPv4,
-		Quick:     true,
-		KeepState: true,
-		Label:     "block-test-65532",
-		Source:    pf.Address{Any: true},
+		Action:      pf.ActionBlock,
+		Direction:   pf.DirectionIn,
+		Protocol:    pf.ProtocolTCP,
+		AF:          pf.AddressFamilyIPv4,
+		Quick:       true,
+		KeepState:   true,
+		Label:       "block-test-65532",
+		Source:      pf.Address{Any: true},
 		Destination: pf.Address{Any: true},
 		DestinationPort: pf.PortMatcher{
 			Operator: pf.PortOpEq,

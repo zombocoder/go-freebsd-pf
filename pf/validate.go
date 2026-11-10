@@ -127,3 +127,62 @@ func ValidateTableName(name string) error {
 	}
 	return nil
 }
+
+// Rule actions from <netpfil/pf/pf.h> used to select a ruleset in
+// DIOCGETRULES/DIOCGETRULE (the kernel's pf_get_ruleset_number). They have
+// not changed since PF was imported; convert.go checks them against the
+// header at compile time.
+const (
+	pfActPass  = 0 // PF_PASS  -> PF_RULESET_FILTER
+	pfActScrub = 2 // PF_SCRUB -> PF_RULESET_SCRUB
+	pfActNAT   = 4 // PF_NAT   -> PF_RULESET_NAT
+	pfActBINAT = 6 // PF_BINAT -> PF_RULESET_BINAT
+	pfActRDR   = 8 // PF_RDR   -> PF_RULESET_RDR
+)
+
+// ruleSetAction returns the rule action that selects rs in DIOCGETRULES.
+// An unknown RuleSet is rejected here, so an EINVAL from the kernel can
+// only mean a missing anchor.
+func ruleSetAction(rs RuleSet) (uint8, error) {
+	switch rs {
+	case RuleSetScrub:
+		return pfActScrub, nil
+	case RuleSetFilter:
+		return pfActPass, nil
+	case RuleSetNAT:
+		return pfActNAT, nil
+	case RuleSetBINAT:
+		return pfActBINAT, nil
+	case RuleSetRDR:
+		return pfActRDR, nil
+	}
+	return 0, fmt.Errorf("%w: unknown rule set %d", ErrInvalidArgument, rs)
+}
+
+// Sizes of the C char arrays strings are copied into (including the NUL),
+// from <net/if.h> and <netpfil/pf/pf.h>; convert.go checks them against
+// the headers at compile time.
+const (
+	ifNameSize     = 16   // IFNAMSIZ
+	ruleLabelSize  = 64   // PF_RULE_LABEL_SIZE
+	tableNameSize  = 32   // PF_TABLE_NAME_SIZE
+	anchorPathSize = 1024 // MAXPATHLEN
+)
+
+// checkCString reports whether s fits a C char[size] including its NUL.
+// Strings are never truncated: a cut interface name, label or anchor would
+// make the kernel act on a different object than the caller named.
+func checkCString(field, s string, size int) error {
+	if len(s) >= size {
+		return fmt.Errorf("%w: %s %q is too long (max %d bytes)", ErrInvalidArgument, field, s, size-1)
+	}
+	return nil
+}
+
+// validateStateFilter checks the string fields of a StateFilter.
+func validateStateFilter(f StateFilter) error {
+	if err := checkCString("interface", f.Interface, ifNameSize); err != nil {
+		return err
+	}
+	return checkCString("label", f.Label, ruleLabelSize)
+}

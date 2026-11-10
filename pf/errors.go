@@ -36,6 +36,19 @@ var (
 
 	// ErrNoStates is returned when no states match a filter.
 	ErrNoStates = errors.New("pf: no matching states")
+
+	// ErrNotSupported is returned when the running kernel does not
+	// implement the ioctl an operation needs. On FreeBSD 15 this happens
+	// for DIOCSTART, DIOCSTOP and DIOCGETSTATESV2 when the kernel is
+	// built without "options COMPAT_FREEBSD14" (GENERIC has it).
+	ErrNotSupported = errors.New("pf: operation not supported by this kernel")
+
+	// ErrStatesIncomplete is returned by ListStates when it cannot confirm
+	// a complete listing (the state table kept changing between passes or
+	// is larger than the 256 MiB buffer limit). The kernel gives no signal
+	// when its reply is cut short, so ListStates returns this instead of a
+	// possibly incomplete list; retrying later usually succeeds.
+	ErrStatesIncomplete = errors.New("pf: could not list the complete state table")
 )
 
 // OpError describes a failed PF ioctl operation.
@@ -75,4 +88,25 @@ func mapErrno(op string, errno syscall.Errno) error {
 	default:
 		return &OpError{Op: op, Errno: errno}
 	}
+}
+
+// compatUnsupported turns the "unknown ioctl" errors of /dev/pf (pfioctl
+// answers ENODEV, the generic ioctl layer ENOTTY) into ErrNotSupported.
+// It is used for ioctls that the kernel may compile out, so callers can
+// tell "not available here" apart from a real failure.
+func compatUnsupported(err error) error {
+	var opErr *OpError
+	if !errors.As(err, &opErr) {
+		return err
+	}
+	if opErr.Errno != syscall.ENODEV && opErr.Errno != syscall.ENOTTY {
+		return err
+	}
+	return &OpError{Op: opErr.Op, Errno: opErr.Errno, Err: ErrNotSupported}
+}
+
+// isErrno reports whether err is an *OpError for the given errno.
+func isErrno(err error, errno syscall.Errno) bool {
+	var opErr *OpError
+	return errors.As(err, &opErr) && opErr.Errno == errno
 }

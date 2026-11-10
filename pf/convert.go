@@ -20,13 +20,28 @@ import (
 	"unsafe"
 )
 
+// The ruleset-selecting actions in validate.go must match the header; a
+// mismatch makes one of these constant indexes out of range at compile time.
+var (
+	_ = [1]int{}[C.PF_PASS-pfActPass]
+	_ = [1]int{}[C.PF_SCRUB-pfActScrub]
+	_ = [1]int{}[C.PF_NAT-pfActNAT]
+	_ = [1]int{}[C.PF_BINAT-pfActBINAT]
+	_ = [1]int{}[C.PF_RDR-pfActRDR]
+
+	_ = [1]int{}[C.IFNAMSIZ-ifNameSize]
+	_ = [1]int{}[C.PF_RULE_LABEL_SIZE-ruleLabelSize]
+	_ = [1]int{}[C.PF_TABLE_NAME_SIZE-tableNameSize]
+	_ = [1]int{}[C.MAXPATHLEN-anchorPathSize]
+)
+
 // ruleToC converts a Go Rule to C pfioc_rule struct.
-func ruleToC(r Rule, anchor string) C.struct_pfioc_rule {
+func ruleToC(r Rule, anchor string) (C.struct_pfioc_rule, error) {
 	var pr C.struct_pfioc_rule
 	C.memset(unsafe.Pointer(&pr), 0, C.sizeof_struct_pfioc_rule)
 
-	if anchor != "" {
-		copyStringToC(&pr.anchor[0], anchor, C.MAXPATHLEN)
+	if err := copyStringToC(&pr.anchor[0], "anchor", anchor, C.MAXPATHLEN); err != nil {
+		return pr, err
 	}
 
 	rule := &pr.rule
@@ -52,8 +67,8 @@ func ruleToC(r Rule, anchor string) C.struct_pfioc_rule {
 	}
 
 	// Interface
-	if r.Interface != "" {
-		copyStringToC(&rule.ifname[0], r.Interface, C.IFNAMSIZ)
+	if err := copyStringToC(&rule.ifname[0], "interface", r.Interface, C.IFNAMSIZ); err != nil {
+		return pr, err
 	}
 
 	// Protocol
@@ -80,11 +95,11 @@ func ruleToC(r Rule, anchor string) C.struct_pfioc_rule {
 	}
 
 	// Label
-	if r.Label != "" {
-		copyStringToC(&rule.label[0], r.Label, C.PF_RULE_LABEL_SIZE)
+	if err := copyStringToC(&rule.label[0], "label", r.Label, C.PF_RULE_LABEL_SIZE); err != nil {
+		return pr, err
 	}
 
-	return pr
+	return pr, nil
 }
 
 // setRuleAddr configures a pf_rule_addr from Go types.
@@ -380,13 +395,16 @@ func cPfrAddr(ta TableAddress) C.struct_pfr_addr {
 // stateFromC converts a C pf_state_export to a Go State.
 func stateFromC(cs *C.struct_pf_state_export) State {
 	s := State{
-		ID:        uint64(cs.id),
-		CreatorID: uint32(cs.creatorid),
-		Interface: strings.TrimRight(C.GoString(&cs.ifname[0]), "\x00"),
-		Protocol:  Protocol(cs.proto),
-		AF:        AddressFamily(cs.af),
-		Creation:  time.Duration(cs.creation) * time.Second,
-		Expire:    time.Duration(cs.expire) * time.Second,
+		ID:            be64toh(uint64(cs.id)),
+		CreatorID:     ntohl(uint32(cs.creatorid)),
+		Interface:     strings.TrimRight(C.GoString(&cs.ifname[0]), "\x00"),
+		OrigInterface: strings.TrimRight(C.GoString(&cs.orig_ifname[0]), "\x00"),
+		Protocol:      Protocol(cs.proto),
+		AF:            AddressFamily(cs.af),
+		// pf_state_export(): id, creatorid, creation and expire are
+		// stored in network byte order.
+		Creation: time.Duration(ntohl(uint32(cs.creation))) * time.Second,
+		Expire:   time.Duration(ntohl(uint32(cs.expire))) * time.Second,
 	}
 
 	switch cs.direction {
@@ -404,19 +422,22 @@ func stateFromC(cs *C.struct_pf_state_export) State {
 	// pf_state_key_export has addr[2] (pf_addr) and port[2]
 	// Access through raw bytes since cgo represents unions as byte arrays
 	addrBytes := (*[32]byte)(unsafe.Pointer(&wireKey.addr[0]))
+	var addrs [2]net.IP
 	switch cs.af {
 	case C.AF_INET:
-		s.Source = net.IPv4(addrBytes[0], addrBytes[1], addrBytes[2], addrBytes[3])
-		s.Destination = net.IPv4(addrBytes[16], addrBytes[17], addrBytes[18], addrBytes[19])
+		addrs[0] = net.IPv4(addrBytes[0], addrBytes[1], addrBytes[2], addrBytes[3])
+		addrs[1] = net.IPv4(addrBytes[16], addrBytes[17], addrBytes[18], addrBytes[19])
 	case C.AF_INET6:
-		s.Source = make(net.IP, 16)
-		copy(s.Source, addrBytes[0:16])
-		s.Destination = make(net.IP, 16)
-		copy(s.Destination, addrBytes[16:32])
+		addrs[0] = make(net.IP, 16)
+		copy(addrs[0], addrBytes[0:16])
+		addrs[1] = make(net.IP, 16)
+		copy(addrs[1], addrBytes[16:32])
 	}
-
-	s.SourcePort = ntohs(C.u_int16_t(wireKey.port[0]))
-	s.DestPort = ntohs(C.u_int16_t(wireKey.port[1]))
+	ports := [2]uint16{
+		ntohs(C.u_int16_t(wireKey.port[0])),
+		ntohs(C.u_int16_t(wireKey.port[1])),
+	}
+	s.Source, s.Destination, s.SourcePort, s.DestPort = orientWireKey(s.Direction, addrs, ports)
 
 	s.Packets[0] = uint64(cs.packets[0])
 	s.Packets[1] = uint64(cs.packets[1])
@@ -427,16 +448,15 @@ func stateFromC(cs *C.struct_pf_state_export) State {
 }
 
 // cStateKill converts a StateFilter to a C pfioc_state_kill.
-func cStateKill(f StateFilter) C.struct_pfioc_state_kill {
+func cStateKill(f StateFilter) (C.struct_pfioc_state_kill, error) {
 	var psk C.struct_pfioc_state_kill
 	C.memset(unsafe.Pointer(&psk), 0, C.sizeof_struct_pfioc_state_kill)
 
-	if f.Interface != "" {
-		copyStringToC(&psk.psk_ifname[0], f.Interface, C.IFNAMSIZ)
+	if err := copyStringToC(&psk.psk_ifname[0], "interface", f.Interface, C.IFNAMSIZ); err != nil {
+		return psk, err
 	}
-
-	if f.Label != "" {
-		copyStringToC(&psk.psk_label[0], f.Label, C.PF_RULE_LABEL_SIZE)
+	if err := copyStringToC(&psk.psk_label[0], "label", f.Label, C.PF_RULE_LABEL_SIZE); err != nil {
+		return psk, err
 	}
 
 	if f.Source != nil {
@@ -451,7 +471,7 @@ func cStateKill(f StateFilter) C.struct_pfioc_state_kill {
 		setStateAddr(&psk.psk_dst, f.Destination)
 	}
 
-	return psk
+	return psk, nil
 }
 
 func afFromNet(ip net.IP) C.sa_family_t {

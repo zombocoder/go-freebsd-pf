@@ -13,9 +13,14 @@ package pf
 #include <string.h>
 */
 import "C"
-import "unsafe"
+import (
+	"syscall"
+	"unsafe"
+)
 
-// ListRules retrieves the rules matching the given query.
+// ListRules retrieves the rules matching the given query. An unknown
+// query.RuleSet returns ErrInvalidArgument; an anchor that does not exist
+// has no rules.
 func (c *Client) ListRules(query RuleQuery) ([]Rule, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -23,15 +28,26 @@ func (c *Client) ListRules(query RuleQuery) ([]Rule, error) {
 		return nil, err
 	}
 
+	action, err := ruleSetAction(query.RuleSet)
+	if err != nil {
+		return nil, err
+	}
+
 	var pr C.struct_pfioc_rule
 	C.memset(unsafe.Pointer(&pr), 0, C.sizeof_struct_pfioc_rule)
 
-	if query.Anchor != "" {
-		copyStringToC(&pr.anchor[0], query.Anchor, C.MAXPATHLEN)
+	if err := copyStringToC(&pr.anchor[0], "anchor", query.Anchor, C.MAXPATHLEN); err != nil {
+		return nil, err
 	}
-	pr.rule.action = C.u_int8_t(query.RuleSet)
+	pr.rule.action = C.u_int8_t(action)
 
 	if err := ioctlGetRules(c.fd, &pr); err != nil {
+		// The kernel answers EINVAL for an anchor that does not exist
+		// (pf_ioctl_getrules); committing an empty ruleset removes the
+		// anchor, so report it as empty, as pfctl -a does.
+		if query.Anchor != "" && isErrno(err, syscall.EINVAL) {
+			return nil, nil
+		}
 		return nil, err
 	}
 
@@ -43,11 +59,12 @@ func (c *Client) ListRules(query RuleQuery) ([]Rule, error) {
 		var gr C.struct_pfioc_rule
 		C.memset(unsafe.Pointer(&gr), 0, C.sizeof_struct_pfioc_rule)
 
-		if query.Anchor != "" {
-			copyStringToC(&gr.anchor[0], query.Anchor, C.MAXPATHLEN)
-		}
+		// Same anchor as above; it fits.
+		_ = copyStringToC(&gr.anchor[0], "anchor", query.Anchor, C.MAXPATHLEN)
 		gr.ticket = ticket
 		gr.nr = C.u_int32_t(i)
+		// Same ruleset selector as DIOCGETRULES, so the ticket matches.
+		gr.rule.action = C.u_int8_t(action)
 
 		if err := ioctlGetRule(c.fd, &gr); err != nil {
 			return rules, err
@@ -59,8 +76,12 @@ func (c *Client) ListRules(query RuleQuery) ([]Rule, error) {
 	return rules, nil
 }
 
-// AddRule adds a single rule to PF. For transactional rule loading,
-// use Begin/Transaction instead.
+// AddRule adds a single rule to PF outside a transaction.
+//
+// Deprecated: the kernel only accepts DIOCADDRULE with the ticket of an
+// open transaction, so this call fails (EINVAL on FreeBSD 15.1). Use
+// Client.Begin with Transaction.AddRule and Transaction.Commit, or
+// Client.ReplaceRules, instead.
 func (c *Client) AddRule(rule Rule) error {
 	if err := ValidateRule(rule); err != nil {
 		return err
@@ -72,7 +93,10 @@ func (c *Client) AddRule(rule Rule) error {
 		return err
 	}
 
-	pr := ruleToC(rule, rule.Anchor)
+	pr, err := ruleToC(rule, rule.Anchor)
+	if err != nil {
+		return err
+	}
 	pr.action = C.PF_CHANGE_ADD_TAIL
 	pr.pool_ticket = 0
 

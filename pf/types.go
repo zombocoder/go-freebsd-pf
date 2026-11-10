@@ -78,16 +78,16 @@ func (p Protocol) String() string {
 type PortOperator uint8
 
 const (
-	PortOpNone  PortOperator = iota // no port match
-	PortOpIRG                       // inclusive range
-	PortOpEq                        // =
-	PortOpNe                        // !=
-	PortOpLt                        // <
-	PortOpLe                        // <=
-	PortOpGt                        // >
-	PortOpGe                        // >=
-	PortOpXRG                       // exclusive range
-	PortOpRRG                       // reverse range
+	PortOpNone PortOperator = iota // no port match
+	PortOpIRG                      // inclusive range
+	PortOpEq                       // =
+	PortOpNe                       // !=
+	PortOpLt                       // <
+	PortOpLe                       // <=
+	PortOpGt                       // >
+	PortOpGe                       // >=
+	PortOpXRG                      // exclusive range
+	PortOpRRG                      // reverse range
 )
 
 // PortMatcher matches a port or port range.
@@ -219,22 +219,22 @@ type Status struct {
 // StatusCounters holds PF packet match counters (the "Counters" section
 // of `pfctl -s info`).
 type StatusCounters struct {
-	Match          uint64
-	BadOffset      uint64
-	Fragment       uint64
-	Short          uint64
-	Normalize      uint64
-	Memory         uint64
-	BadTimestamp   uint64
-	Congestion     uint64
-	IPOption       uint64
-	ProtoChecksum  uint64
-	StateMismatch  uint64
-	StateInsert    uint64
-	StateLimit     uint64
-	SrcLimit       uint64
-	SynProxy       uint64
-	MapFailed      uint64
+	Match         uint64
+	BadOffset     uint64
+	Fragment      uint64
+	Short         uint64
+	Normalize     uint64
+	Memory        uint64
+	BadTimestamp  uint64
+	Congestion    uint64
+	IPOption      uint64
+	ProtoChecksum uint64
+	StateMismatch uint64
+	StateInsert   uint64
+	StateLimit    uint64
+	SrcLimit      uint64
+	SynProxy      uint64
+	MapFailed     uint64
 }
 
 // StateTableCounters holds state table search/insert/removal counters
@@ -260,13 +260,13 @@ type LimitCounters struct {
 type TableFlags uint32
 
 const (
-	TableFlagPersist TableFlags = 0x01
-	TableFlagConst   TableFlags = 0x02
-	TableFlagActive  TableFlags = 0x04
-	TableFlagInactive TableFlags = 0x08
+	TableFlagPersist    TableFlags = 0x01
+	TableFlagConst      TableFlags = 0x02
+	TableFlagActive     TableFlags = 0x04
+	TableFlagInactive   TableFlags = 0x08
 	TableFlagReferenced TableFlags = 0x10
-	TableFlagRefdAnch TableFlags = 0x20
-	TableFlagCounters TableFlags = 0x40
+	TableFlagRefdAnch   TableFlags = 0x20
+	TableFlagCounters   TableFlags = 0x40
 )
 
 // Table represents a PF table.
@@ -285,24 +285,32 @@ type TableAddress struct {
 
 // State represents a PF state table entry.
 type State struct {
-	ID          uint64
-	CreatorID   uint32
-	Interface   string
-	Protocol    Protocol
-	Direction   Direction
-	AF          AddressFamily
-	Source      net.IP
-	Destination net.IP
-	SourcePort  uint16
-	DestPort    uint16
-	Packets     [2]uint64
-	Bytes       [2]uint64
-	Creation    time.Duration
-	Expire      time.Duration
+	ID        uint64
+	CreatorID uint32
+	// Interface is the interface the state is bound to: "all" for a
+	// floating state (the default state-policy), else an interface name.
+	Interface string
+	// OrigInterface is the interface the state was created on.
+	OrigInterface string
+	Protocol      Protocol
+	Direction     Direction
+	AF            AddressFamily
+	Source        net.IP
+	Destination   net.IP
+	SourcePort    uint16
+	DestPort      uint16
+	Packets       [2]uint64
+	Bytes         [2]uint64
+	Creation      time.Duration
+	Expire        time.Duration
 }
 
 // StateFilter specifies criteria for filtering states.
 type StateFilter struct {
+	// Interface selects states as the kernel does for kill/clear: a
+	// floating state by the interface it was created on (OrigInterface),
+	// an if-bound state by the interface it is bound to. "all" therefore
+	// matches no floating state; use an empty Interface for every state.
 	Interface   string
 	Source      *net.IPNet
 	Destination *net.IPNet
