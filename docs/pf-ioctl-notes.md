@@ -8,7 +8,7 @@ Enable or disable PF. These take no arguments (the ioctl argument is ignored). R
 
 ## DIOCGETSTATUS
 
-Retrieves PF status information. Takes a pointer to `struct pf_status` (defined in `<netpfil/pf/pf.h>`, re-exported via `<net/pfvar.h>`).
+Retrieves PF status information (13.x/14.x; on 15.x see DIOCGETSTATUSNV below, whose reply is copied into the same struct). Takes a pointer to `struct pf_status` (defined in `<netpfil/pf/pf.h>`, re-exported via `<net/pfvar.h>`).
 
 Key fields:
 - `running` -- 1 if PF is enabled, 0 otherwise
@@ -30,7 +30,7 @@ Retrieve rules using ticket-based iteration.
 
 **DIOCGETRULES** takes a `struct pfioc_rule` with the `anchor` field set and `rule.action` set to indicate the ruleset (PF_PASS for filter rules). The kernel fills in `nr` (total number of rules) and `ticket` (iteration ticket).
 
-**DIOCGETRULE** takes the same struct with `ticket` and `nr` set to the index of the desired rule (0-based). The kernel fills in the `rule` field with the complete rule data.
+**DIOCGETRULE** (13.x/14.x; DIOCGETRULENV on 15.x) takes the same struct with `ticket` and `nr` set to the index of the desired rule (0-based). The kernel fills in the `rule` field with the complete rule data.
 
 Typical iteration pattern:
 ```
@@ -44,7 +44,7 @@ Typical iteration pattern:
 
 ## DIOCADDRULE
 
-Add a rule to a ruleset. Takes a `struct pfioc_rule` with the `rule` field populated and `ticket` set from a DIOCXBEGIN transaction. The `anchor` field specifies the target anchor (empty string for the main ruleset). The `pool_ticket` field should be set to 0 for simple rules.
+Add a rule to a ruleset. Takes a `struct pfioc_rule` with the `rule` field populated and `ticket` set from a DIOCXBEGIN transaction. The `anchor` field specifies the target anchor (empty string for the main ruleset). The `pool_ticket` field must be the ticket returned by `DIOCBEGINADDRS` (struct `pfioc_pooladdr`): the kernel compares it with its current pool-buffer ticket, so 0 only works until something else (for example `pfctl -f`) has called `DIOCBEGINADDRS`.
 
 ## DIOCXBEGIN / DIOCXCOMMIT / DIOCXROLLBACK
 
@@ -122,7 +122,9 @@ Each `struct pf_state_export` contains:
 - `packets[2]`, `bytes[2]` -- traffic counters (in/out)
 - `creation`, `expire` -- timing information in seconds
 
-Note: DIOCGETSTATESV2 was added in FreeBSD 14.0. Older versions only have DIOCGETSTATES (which uses a different struct layout).
+Note: DIOCGETSTATESV2 is declared in `<net/pfvar.h>` from 13.2 through 14.x. On 15.x it is declared only under `COMPAT_FREEBSD14` and served only by kernels built with that option; the package defines the request itself there.
+
+`id` and `creatorid` (big-endian) and `creation`/`expire` (`htonl`) are in network byte order. The state keys are stored in inbound orientation: for an outbound state the initiator is in slot 1 of the wire key. A floating state's `ifname` is `all`; `orig_ifname` is the interface it was created on.
 
 ## DIOCCLRSTATES / DIOCKILLSTATES
 
@@ -139,7 +141,7 @@ struct pfioc_state_kill {
 };
 ```
 
-**DIOCCLRSTATES** clears all matching states. **DIOCKILLSTATES** also clears matching states but is designed for targeted removal. Both return the number of states killed via the ioctl return mechanism.
+**DIOCCLRSTATES** clears all matching states. **DIOCKILLSTATES** also clears matching states but is designed for targeted removal. Both return the number of states removed in `psk_killed`. On 15.x only the NV variants (`DIOCCLRSTATESNV`, `DIOCKILLSTATESNV`) exist.
 
 Setting all fields to zero matches all states (clears the entire state table).
 
@@ -153,8 +155,34 @@ cgo translates C unions into Go byte arrays (`[N]byte`). This means union member
 
 ## Notes on NV (Name-Value) Variants
 
-FreeBSD has been adding NV (nvlist-based) variants of PF ioctls:
-- `DIOCGETSTATUSNV` -- NV variant of DIOCGETSTATUS
-- Other NV ioctls are being added incrementally
+The NV variants take a `struct pfioc_nv { void *data; size_t len; size_t size; }`
+holding a packed `nvlist_t` (libnv). The kernel unpacks the request from
+`data`/`len`, packs its reply into the same buffer and sets `len`; if the
+reply is larger than `size` it fails with `ENOSPC` (the caller retries with a
+larger buffer). `nvlist_get_*` in libnv aborts on a missing key, so the
+decoder checks every key first.
 
-The NV variants use `nvlist_t` serialization instead of fixed C structs, which provides better forward compatibility and versioning. These are the intended future direction for PF management interfaces in FreeBSD. This library currently uses the traditional struct-based ioctls for maximum compatibility across FreeBSD versions.
+FreeBSD 15 removed the struct versions of several ioctls, so the package uses
+these NV ioctls whenever the struct macro is missing (see
+`docs/compatibility.md`). Key layouts, from `sys/netpfil/pf/pf_ioctl.c` and
+`pf_nv.c` on 15.1:
+
+- `DIOCGETSTATUSNV` (request: empty nvlist). Reply: `running` (bool),
+  `since`, `debug`, `hostid`, `states`, `src_nodes`, `reass`,
+  `halfopen_states` (numbers), `counters`/`lcounters`/`fcounters`/`scounters`
+  (nvlists with `counters`, `names`, `ids` arrays), `ifname`, `chksum`
+  (binary), `pcounters`, `bcounters` (number arrays).
+- `DIOCGETRULENV`. Request: `anchor` (string), `ruleset` (the action value
+  DIOCGETRULES used), `ticket`, `nr`, optional `clear_counter`. Reply: `nr`,
+  `rule` (nvlist from `pf_krule_to_nvrule`: `action`, `direction`, `quick`,
+  `log`, `keep_state`, `af`, `proto`, `ifname`, `label`, `src`/`dst` rule
+  addresses, `evaluations`, `packets`/`bytes` arrays, ...), `anchor_call`.
+- `DIOCCLRSTATESNV` / `DIOCKILLSTATESNV`. Request (all keys mandatory except
+  `rt_addr` and `nat`): `cmp` {`id`, `creatorid`, `direction`}, `af`,
+  `proto`, `src`, `dst`, `ifname`, `label`, `kill_match`. Reply: `killed`.
+- A rule address is {`addr`: {`type`, `iflags`, [`tblname`|`ifname`],
+  `addr`: {`addr`: 16-byte binary}, `mask`: {`addr`: ...}}, `port`: [2],
+  `neg`, `port_op`}.
+
+On 13.x/14.x the struct ioctls are still used; `CGO_CFLAGS=-DGOPF_FORCE_NV`
+switches those builds to the NV path.

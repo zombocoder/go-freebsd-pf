@@ -13,7 +13,7 @@ This library provides a native Go interface to PF's kernel-level ioctl API, enab
 
 ## Requirements
 
-- FreeBSD 13.2 or later (14.0+ recommended for full feature support)
+- FreeBSD 13.2 or later (13.x, 14.x, 15.x)
 - Go 1.22 or later
 - cgo enabled (CGO_ENABLED=1)
 - Root privileges (or appropriate /dev/pf permissions)
@@ -68,15 +68,14 @@ func main() {
 
 ## Supported FreeBSD Versions
 
-| Version | Support Level |
-|---------|--------------|
-| 13.2    | Supported (no state listing via DIOCGETSTATESV2) |
-| 13.3    | Supported (no state listing via DIOCGETSTATESV2) |
-| 14.0    | Full support |
-| 14.1    | Full support |
-| 14.2    | Full support |
-| 14.3    | Full support |
+| Version     | Support Level |
+|-------------|---------------|
+| 13.2 – 13.5 | Supported |
+| 14.0 – 14.3 | Supported |
+| 15.0 – 15.1 | Supported. Status, rule read-back and state clear/kill use the nvlist ioctls (`DIOC*NV`); Enable/Disable and ListStates need a kernel with `COMPAT_FREEBSD14` (GENERIC has it), otherwise they return `pf.ErrNotSupported` |
 
+The ioctl used for each operation is picked at compile time from what
+`<net/pfvar.h>` defines, so build on the release you run on.
 See `docs/compatibility.md` for detailed ioctl availability by version.
 
 ## Safety Warning
@@ -110,10 +109,21 @@ Run unit tests:
 make test
 ```
 
-Run integration tests (requires root and a running PF instance):
+Run integration tests (requires root and a loaded `pf.ko`):
 
 ```
 make test-integration
+```
+
+The integration tests only touch the `go-freebsd-pf-test` anchors and tap
+interfaces they create. Tests that need PF enabled (state tests,
+Enable/Disable) are skipped unless `GOPF_TEST_ENABLE_PF=1` is set, and even
+then they run only when PF is disabled with an empty main ruleset: they load
+`anchor "go-freebsd-pf-test/*"` plus `pass all no state`, enable PF, and
+restore "disabled, no ruleset" afterwards.
+
+```
+doas env GOPF_TEST_ENABLE_PF=1 go test -tags integration ./pf/
 ```
 
 Build all examples:
