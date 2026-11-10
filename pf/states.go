@@ -108,15 +108,18 @@ func (c *Client) ClearStates(filter StateFilter) (int, error) {
 		return 0, err
 	}
 
-	psk, err := cStateKill(filter)
+	// The kernel clears by interface (and KillMatch) only; NAT would just
+	// make older kernels refuse a request they can serve.
+	filter.NAT = false
+	sk, err := cStateKill(filter)
 	if err != nil {
 		return 0, err
 	}
-	if err := ioctlClearStates(c.fd, &psk); err != nil {
+	if err := ioctlClearStates(c.fd, &sk); err != nil {
 		return 0, err
 	}
 
-	return int(psk.psk_killed), nil
+	return int(sk.psk.psk_killed), nil
 }
 
 // KillStates kills states matching the filter.
@@ -128,13 +131,13 @@ func (c *Client) KillStates(filter StateFilter) (int, error) {
 		return 0, err
 	}
 
-	psk, err := cStateKill(filter)
+	sk, err := cStateKill(filter)
 	if err != nil {
 		return 0, err
 	}
-	if err := ioctlKillStates(c.fd, &psk); err != nil {
+	if err := ioctlKillStates(c.fd, &sk); err != nil {
 		return 0, err
 	}
 
-	return int(psk.psk_killed), nil
+	return int(sk.psk.psk_killed), nil
 }

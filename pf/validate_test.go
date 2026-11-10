@@ -349,3 +349,25 @@ func TestValidateStateFilter(t *testing.T) {
 		}
 	}
 }
+
+func TestCheckKillFlags(t *testing.T) {
+	nat, match := StateFilter{NAT: true}, StateFilter{KillMatch: true}
+	if err := checkKillFlags(nat, true, true); err != nil {
+		t.Errorf("NAT supported: %v", err)
+	}
+	if err := checkKillFlags(StateFilter{}, false, false); err != nil {
+		t.Errorf("no flags must pass on any kernel: %v", err)
+	}
+	// 13.x/14.x have no NAT matching and the fixed-struct ioctls no
+	// kill-match: a request they would silently run without the flag
+	// (killing the wrong states or none) must be refused instead.
+	if err := checkKillFlags(nat, false, true); !errors.Is(err, ErrNotSupported) {
+		t.Errorf("NAT unsupported = %v; want ErrNotSupported", err)
+	}
+	if err := checkKillFlags(match, true, false); !errors.Is(err, ErrNotSupported) {
+		t.Errorf("KillMatch unsupported = %v; want ErrNotSupported", err)
+	}
+	if err := checkKillFlags(match, false, true); err != nil {
+		t.Errorf("KillMatch supported: %v", err)
+	}
+}

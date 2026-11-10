@@ -431,6 +431,24 @@ func cPfrAddr(ta TableAddress) C.struct_pfr_addr {
 	return ca
 }
 
+// stateKeyEndpoints reads one state key of cs (PF_SK_WIRE or PF_SK_STACK)
+// as initiator/responder addresses and ports.
+//
+// pf_state_export carries a single address family, the wire one (the
+// kernel exports sk[PF_SK_WIRE]->af), so the stack key is decoded with it
+// too. For an af-to (nat64) state the stack key has the other family and
+// decodes to garbage or nothing: NAT-key matching is unreliable for those.
+func stateKeyEndpoints(cs *C.struct_pf_state_export, idx int, dir Direction) (src, dst net.IP, sport, dport uint16) {
+	key := &cs.key[idx]
+	// Access through raw bytes since cgo represents unions as byte arrays.
+	raw := *(*[32]byte)(unsafe.Pointer(&key.addr[0]))
+	ports := [2]uint16{
+		ntohs(C.u_int16_t(key.port[0])),
+		ntohs(C.u_int16_t(key.port[1])),
+	}
+	return decodeStateKey(AddressFamily(cs.af), raw, ports, dir)
+}
+
 // stateFromC converts a C pf_state_export to a Go State.
 func stateFromC(cs *C.struct_pf_state_export) State {
 	s := State{
@@ -455,28 +473,10 @@ func stateFromC(cs *C.struct_pf_state_export) State {
 		s.Direction = DirectionAny
 	}
 
-	// Extract source/dest from key[PF_SK_WIRE]
-	wireKey := &cs.key[C.PF_SK_WIRE]
-
-	// pf_state_key_export has addr[2] (pf_addr) and port[2]
-	// Access through raw bytes since cgo represents unions as byte arrays
-	addrBytes := (*[32]byte)(unsafe.Pointer(&wireKey.addr[0]))
-	var addrs [2]net.IP
-	switch cs.af {
-	case C.AF_INET:
-		addrs[0] = net.IPv4(addrBytes[0], addrBytes[1], addrBytes[2], addrBytes[3])
-		addrs[1] = net.IPv4(addrBytes[16], addrBytes[17], addrBytes[18], addrBytes[19])
-	case C.AF_INET6:
-		addrs[0] = make(net.IP, 16)
-		copy(addrs[0], addrBytes[0:16])
-		addrs[1] = make(net.IP, 16)
-		copy(addrs[1], addrBytes[16:32])
-	}
-	ports := [2]uint16{
-		ntohs(C.u_int16_t(wireKey.port[0])),
-		ntohs(C.u_int16_t(wireKey.port[1])),
-	}
-	s.Source, s.Destination, s.SourcePort, s.DestPort = orientWireKey(s.Direction, addrs, ports)
+	// Source/destination come from key[PF_SK_WIRE]; the NAT filter uses
+	// key[PF_SK_STACK], which differs only for translated states.
+	s.Source, s.Destination, s.SourcePort, s.DestPort = stateKeyEndpoints(cs, C.PF_SK_WIRE, s.Direction)
+	s.natSource, s.natDestination, _, _ = stateKeyEndpoints(cs, C.PF_SK_STACK, s.Direction)
 
 	s.Packets[0] = uint64(cs.packets[0])
 	s.Packets[1] = uint64(cs.packets[1])
@@ -486,16 +486,22 @@ func stateFromC(cs *C.struct_pf_state_export) State {
 	return s
 }
 
-// cStateKill converts a StateFilter to a C pfioc_state_kill.
-func cStateKill(f StateFilter) (C.struct_pfioc_state_kill, error) {
-	var psk C.struct_pfioc_state_kill
-	C.memset(unsafe.Pointer(&psk), 0, C.sizeof_struct_pfioc_state_kill)
+// cStateKill converts a StateFilter to a C pfioc_state_kill plus flags.
+func cStateKill(f StateFilter) (stateKill, error) {
+	var sk stateKill
+	psk := &sk.psk
+	C.memset(unsafe.Pointer(psk), 0, C.sizeof_struct_pfioc_state_kill)
+
+	if err := checkKillFlags(f, natKillSupported, killMatchSupported); err != nil {
+		return sk, err
+	}
+	sk.nat, sk.killMatch = f.NAT, f.KillMatch
 
 	if err := copyStringToC(&psk.psk_ifname[0], "interface", f.Interface, C.IFNAMSIZ); err != nil {
-		return psk, err
+		return sk, err
 	}
 	if err := copyStringToC(&psk.psk_label[0], "label", f.Label, C.PF_RULE_LABEL_SIZE); err != nil {
-		return psk, err
+		return sk, err
 	}
 
 	if f.Source != nil {
@@ -510,7 +516,7 @@ func cStateKill(f StateFilter) (C.struct_pfioc_state_kill, error) {
 		setStateAddr(&psk.psk_dst, f.Destination)
 	}
 
-	return psk, nil
+	return sk, nil
 }
 
 func afFromNet(ip net.IP) C.sa_family_t {

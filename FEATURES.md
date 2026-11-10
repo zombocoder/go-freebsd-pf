@@ -92,6 +92,34 @@ the table in passes and only returns a listing it could confirm (room to
 spare and the same size twice); otherwise it returns `ErrStatesIncomplete`
 rather than a short list (buffer limit 256 MiB, about 700k states).
 Over-long interface names or labels are rejected, never truncated.
+
+`StateFilter.NAT` (`pfctl -k nat`) matches `Source` and `Destination` against
+the state's NAT (stack-side) key instead of the wire key. A NAT state is
+listed by `pfctl -ss` with the post-translation address on the wire key and
+the original address, such as a guest's, only on the other key, so
+`KillStates(StateFilter{Source: guest})` removes the guest's own states but
+leaves the NAT states on the external interface; add `NAT: true` to kill
+those, or run both. For states that are not translated both keys are equal,
+so `NAT: true` with a guest address also matches the unmodified states
+(narrow it with `Interface` to select the external one). `ListStates` honors
+`NAT` too, so a listing shows what the kill would remove (the `Source` and
+`Destination` of a returned `State` stay the wire key). `NAT` needs FreeBSD
+15, whose kernel and nvlist parser have it (13.x and 14.x do not, and
+ignore the nvlist key): there `KillStates` returns `ErrNotSupported` rather
+than match the wrong key; the check follows the headers the package was
+built against, so a binary built on 15 and run on 13/14 would send an
+ignored `nat` key. `ListStates` with `NAT` is evaluated in Go and works on
+13.x and 14.x too. `pf_state_export` carries only the wire address family,
+so the NAT key is decoded with it: for af-to (nat64) states `ListStates`
+with `NAT` is wrong (the kernel's own match in `KillStates` is not).
+`ClearStates` ignores it, as the kernel clears by
+interface only.
+
+`StateFilter.KillMatch` (`pfctl -M`) also removes the state the kernel finds
+as the peer of each matched state (nothing is removed for no match or an
+ambiguous one). It exists only in the nvlist ioctls, so
+it works on 15 and in `GOPF_FORCE_NV` builds, and a default 13.x/14.x build
+returns `ErrNotSupported`. It applies to `KillStates` and `ClearStates`.
 `State` carries id, creator id, `Interface` / `OrigInterface`, protocol,
 direction, address family, source/destination address and port (initiator
 first), packet and byte counters, age and time to expiry.

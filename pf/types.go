@@ -386,6 +386,12 @@ type State struct {
 	Bytes         [2]uint64
 	Creation      time.Duration
 	Expire        time.Duration
+
+	// natSource and natDestination are the addresses of the state's
+	// stack-side (NAT) key in initiator/responder order, the key
+	// StateFilter.NAT matches. They equal Source and Destination unless
+	// the state was translated.
+	natSource, natDestination net.IP
 }
 
 // StateFilter specifies criteria for filtering states.
@@ -398,4 +404,38 @@ type StateFilter struct {
 	Source      *net.IPNet
 	Destination *net.IPNet
 	Label       string
+
+	// NAT matches Source and Destination against the state's NAT
+	// (stack-side) key instead of the wire key, like pfctl -k nat. A
+	// translated state is listed by pfctl -ss with the post-translation
+	// address on the wire key and the original (for example the guest's)
+	// address only on the other key, so killing the states of a NATed
+	// address needs NAT set. For a state that is not translated both
+	// keys are equal. ListStates and KillStates honor it; ClearStates
+	// ignores it (the kernel clears by interface only).
+	//
+	// The kernel supports it from FreeBSD 15; on 13.x and 14.x KillStates
+	// with NAT set returns ErrNotSupported rather than matching the wire
+	// key. ListStates with NAT is evaluated in Go and works on every
+	// release. Whether KillStates is allowed follows the headers the
+	// package was built against, not the running kernel: a binary built on
+	// 15 and run on 13/14 sends the "nat" key, which those kernels ignore.
+	//
+	// Limitation: the kernel exports only the wire address family of a
+	// state, and the NAT key is decoded with it. For af-to (nat64) states,
+	// whose NAT key has the other family, NAT matching in ListStates is
+	// wrong; the kernel's own match in KillStates is not affected.
+	NAT bool
+
+	// KillMatch also removes the state the kernel finds as the peer of
+	// each matched state (the one created by the same rule match, such as
+	// the other half of a NAT or route-to pair), like pfctl -M. It is
+	// used by KillStates and ClearStates and does not filter ListStates.
+	// The kernel removes the peer only when exactly one state matches the
+	// reversed key (pf_kill_matching_state does nothing for none or for an
+	// ambiguous match), so the count can equal the matched states alone.
+	// It needs the nvlist state ioctls (FreeBSD 15, or a build with
+	// GOPF_FORCE_NV on 13.2+/14); the fixed-struct ioctls of a default
+	// 13.x/14.x build cannot carry it and return ErrNotSupported.
+	KillMatch bool
 }

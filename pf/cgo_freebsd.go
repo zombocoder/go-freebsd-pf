@@ -44,6 +44,18 @@ package pf
 #define GOPF_STATES_KILL_NV 1
 #endif
 
+// Matching a state kill against the NAT (stack) key, pfctl -k nat, exists
+// from FreeBSD 15: only the nvlist parser there reads "nat" (13.x/14.x
+// ignore it). The fixed-struct pfioc_state_kill has neither psk_nat nor
+// psk_kill_match; those live in the kernel's pf_kstate_kill, reachable
+// only through the nvlist ioctls. 15 is told apart by the removed
+// DIOCKILLSTATES, whatever GOPF_FORCE_NV says.
+#ifdef DIOCKILLSTATES
+#define GOPF_KILL_NAT 0
+#else
+#define GOPF_KILL_NAT 1
+#endif
+
 // FreeBSD 15 only declares DIOCGETSTATESV2 under COMPAT_FREEBSD14, a
 // kernel option. The kernel still serves the ioctl when it is built with
 // that option (GENERIC is), and struct pfioc_states_v2 / pf_state_export
@@ -454,7 +466,7 @@ static int pf_get_states_v2(int fd, struct pfioc_states_v2 *ps) {
 // pf_nvstate_kill_to_kstate_kill(); every key there is mandatory except
 // rt_addr and nat. The reply carries "killed".
 static int gopf_states_nv(int fd, unsigned long cmd,
-    struct pfioc_state_kill *psk) {
+    struct pfioc_state_kill *psk, int nat, int kill_match) {
 	nvlist_t *in, *cmp, *out;
 	int rv, err;
 
@@ -470,7 +482,12 @@ static int gopf_states_nv(int fd, unsigned long cmd,
 	nvlist_move_nvlist(in, "dst", gopf_rule_addr_to_nv(&psk->psk_dst));
 	nvlist_add_string(in, "ifname", psk->psk_ifname);
 	nvlist_add_string(in, "label", psk->psk_label);
-	nvlist_add_bool(in, "kill_match", false);
+	nvlist_add_bool(in, "kill_match", kill_match != 0);
+#if GOPF_KILL_NAT
+	nvlist_add_bool(in, "nat", nat != 0);
+#else
+	(void)nat;
+#endif
 	rv = gopf_nv_ioctl(fd, cmd, in, &out);
 	err = errno;
 	nvlist_destroy(in);
@@ -483,19 +500,29 @@ static int gopf_states_nv(int fd, unsigned long cmd,
 	return 0;
 }
 
-static int pf_clear_states(int fd, struct pfioc_state_kill *psk) {
-	return gopf_states_nv(fd, DIOCCLRSTATESNV, psk);
+static int pf_clear_states(int fd, struct pfioc_state_kill *psk, int nat,
+    int kill_match) {
+	return gopf_states_nv(fd, DIOCCLRSTATESNV, psk, nat, kill_match);
 }
 
-static int pf_kill_states(int fd, struct pfioc_state_kill *psk) {
-	return gopf_states_nv(fd, DIOCKILLSTATESNV, psk);
+static int pf_kill_states(int fd, struct pfioc_state_kill *psk, int nat,
+    int kill_match) {
+	return gopf_states_nv(fd, DIOCKILLSTATESNV, psk, nat, kill_match);
 }
 #else
-static int pf_clear_states(int fd, struct pfioc_state_kill *psk) {
+// The fixed-struct ioctls cannot express nat or kill_match; the Go side
+// has refused those flags before getting here (checkKillFlags).
+static int pf_clear_states(int fd, struct pfioc_state_kill *psk, int nat,
+    int kill_match) {
+	(void)nat;
+	(void)kill_match;
 	return ioctl(fd, DIOCCLRSTATES, psk);
 }
 
-static int pf_kill_states(int fd, struct pfioc_state_kill *psk) {
+static int pf_kill_states(int fd, struct pfioc_state_kill *psk, int nat,
+    int kill_match) {
+	(void)nat;
+	(void)kill_match;
 	return ioctl(fd, DIOCKILLSTATES, psk);
 }
 #endif
@@ -582,6 +609,22 @@ var (
 	opClearStates = pickOp(C.GOPF_STATES_KILL_NV, "DIOCCLRSTATESNV", "DIOCCLRSTATES")
 	opKillStates  = pickOp(C.GOPF_STATES_KILL_NV, "DIOCKILLSTATESNV", "DIOCKILLSTATES")
 )
+
+// natKillSupported reports whether the kernel this build targets can match
+// a state kill against the NAT key (FreeBSD 15 and later).
+const natKillSupported = C.GOPF_KILL_NAT != 0 && C.GOPF_STATES_KILL_NV != 0
+
+// killMatchSupported reports whether this build reaches the kernel through
+// the nvlist state ioctls, the only ones that carry kill_match.
+const killMatchSupported = C.GOPF_STATES_KILL_NV != 0
+
+// stateKill is a C pfioc_state_kill plus the flags only the nvlist
+// ioctls carry.
+type stateKill struct {
+	psk       C.struct_pfioc_state_kill
+	nat       bool
+	killMatch bool
+}
 
 // statesV2Compat reports whether DIOCGETSTATESV2 had to be defined by
 // this package because the headers only expose it to COMPAT_FREEBSD14
@@ -748,13 +791,20 @@ func ioctlGetStatesV2(fd int, ps *C.struct_pfioc_states_v2) error {
 	return compatUnsupported(ioctlErr("DIOCGETSTATESV2", rv, err))
 }
 
-func ioctlClearStates(fd int, psk *C.struct_pfioc_state_kill) error {
-	rv, err := C.pf_clear_states(C.int(fd), psk)
+func ioctlClearStates(fd int, sk *stateKill) error {
+	rv, err := C.pf_clear_states(C.int(fd), &sk.psk, cBool(sk.nat), cBool(sk.killMatch))
 	return ioctlErr(opClearStates, rv, err)
 }
 
-func ioctlKillStates(fd int, psk *C.struct_pfioc_state_kill) error {
-	rv, err := C.pf_kill_states(C.int(fd), psk)
+func cBool(b bool) C.int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+func ioctlKillStates(fd int, sk *stateKill) error {
+	rv, err := C.pf_kill_states(C.int(fd), &sk.psk, cBool(sk.nat), cBool(sk.killMatch))
 	return ioctlErr(opKillStates, rv, err)
 }
 
