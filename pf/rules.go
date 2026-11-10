@@ -36,8 +36,8 @@ func (c *Client) ListRules(query RuleQuery) ([]Rule, error) {
 	var pr C.struct_pfioc_rule
 	C.memset(unsafe.Pointer(&pr), 0, C.sizeof_struct_pfioc_rule)
 
-	if query.Anchor != "" {
-		copyStringToC(&pr.anchor[0], query.Anchor, C.MAXPATHLEN)
+	if err := copyStringToC(&pr.anchor[0], "anchor", query.Anchor, C.MAXPATHLEN); err != nil {
+		return nil, err
 	}
 	pr.rule.action = C.u_int8_t(action)
 
@@ -59,9 +59,8 @@ func (c *Client) ListRules(query RuleQuery) ([]Rule, error) {
 		var gr C.struct_pfioc_rule
 		C.memset(unsafe.Pointer(&gr), 0, C.sizeof_struct_pfioc_rule)
 
-		if query.Anchor != "" {
-			copyStringToC(&gr.anchor[0], query.Anchor, C.MAXPATHLEN)
-		}
+		// Same anchor as above; it fits.
+		_ = copyStringToC(&gr.anchor[0], "anchor", query.Anchor, C.MAXPATHLEN)
 		gr.ticket = ticket
 		gr.nr = C.u_int32_t(i)
 		// Same ruleset selector as DIOCGETRULES, so the ticket matches.
@@ -90,7 +89,10 @@ func (c *Client) AddRule(rule Rule) error {
 		return err
 	}
 
-	pr := ruleToC(rule, rule.Anchor)
+	pr, err := ruleToC(rule, rule.Anchor)
+	if err != nil {
+		return err
+	}
 	pr.action = C.PF_CHANGE_ADD_TAIL
 	pr.pool_ticket = 0
 

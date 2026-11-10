@@ -35,7 +35,10 @@ func (c *Client) CreateTable(table Table) error {
 	var pt C.struct_pfioc_table
 	C.memset(unsafe.Pointer(&pt), 0, C.sizeof_struct_pfioc_table)
 
-	ct := cPfrTable(table)
+	ct, err := cPfrTable(table)
+	if err != nil {
+		return err
+	}
 	ct.pfrt_flags |= C.u_int32_t(TableFlagPersist)
 	pt.pfrio_table = ct
 
@@ -70,7 +73,10 @@ func (c *Client) DeleteTable(table Table) error {
 
 	// Strip flags for delete — kernel rejects non-zero flags
 	tblRef := Table{Name: table.Name, Anchor: table.Anchor}
-	ct := cPfrTable(tblRef)
+	ct, err := cPfrTable(tblRef)
+	if err != nil {
+		return err
+	}
 
 	buf := C.malloc(C.size_t(C.sizeof_struct_pfr_table))
 	if buf == nil {
@@ -97,8 +103,8 @@ func (c *Client) ListTables(anchor string) ([]Table, error) {
 	var pt C.struct_pfioc_table
 	C.memset(unsafe.Pointer(&pt), 0, C.sizeof_struct_pfioc_table)
 
-	if anchor != "" {
-		copyStringToC(&pt.pfrio_table.pfrt_anchor[0], anchor, C.MAXPATHLEN)
+	if err := copyStringToC(&pt.pfrio_table.pfrt_anchor[0], "anchor", anchor, C.MAXPATHLEN); err != nil {
+		return nil, err
 	}
 	pt.pfrio_esize = C.int(C.sizeof_struct_pfr_table)
 
@@ -208,7 +214,11 @@ func (c *Client) ListTableAddresses(table Table) ([]TableAddress, error) {
 	C.memset(unsafe.Pointer(&pt), 0, C.sizeof_struct_pfioc_table)
 
 	tblRef := Table{Name: table.Name, Anchor: table.Anchor}
-	pt.pfrio_table = cPfrTable(tblRef)
+	ct, err := cPfrTable(tblRef)
+	if err != nil {
+		return nil, err
+	}
+	pt.pfrio_table = ct
 	pt.pfrio_esize = C.int(C.sizeof_struct_pfr_addr)
 
 	// First call: get count
@@ -270,7 +280,11 @@ func (c *Client) TestTableAddress(table Table, addr net.IP) (bool, error) {
 	var pt C.struct_pfioc_table
 	C.memset(unsafe.Pointer(&pt), 0, C.sizeof_struct_pfioc_table)
 	tblRef := Table{Name: table.Name, Anchor: table.Anchor}
-	pt.pfrio_table = cPfrTable(tblRef)
+	ct, err := cPfrTable(tblRef)
+	if err != nil {
+		return false, err
+	}
+	pt.pfrio_table = ct
 	pt.pfrio_buffer = buf
 	pt.pfrio_esize = C.int(C.sizeof_struct_pfr_addr)
 	pt.pfrio_size = 1
@@ -299,7 +313,11 @@ func (c *Client) FlushTable(table Table) error {
 	var pt C.struct_pfioc_table
 	C.memset(unsafe.Pointer(&pt), 0, C.sizeof_struct_pfioc_table)
 	tblRef := Table{Name: table.Name, Anchor: table.Anchor}
-	pt.pfrio_table = cPfrTable(tblRef)
+	ct, err := cPfrTable(tblRef)
+	if err != nil {
+		return err
+	}
+	pt.pfrio_table = ct
 
 	return ioctlTableClrAddrs(c.fd, &pt)
 }
@@ -325,7 +343,11 @@ func (c *Client) tableAddrOp(fn tableIoctlFunc, table Table, addrs []TableAddres
 	C.memset(unsafe.Pointer(&pt), 0, C.sizeof_struct_pfioc_table)
 	// For address operations, only set name/anchor — not flags
 	tblRef := Table{Name: table.Name, Anchor: table.Anchor}
-	pt.pfrio_table = cPfrTable(tblRef)
+	ct, err := cPfrTable(tblRef)
+	if err != nil {
+		return err
+	}
+	pt.pfrio_table = ct
 	pt.pfrio_buffer = buf
 	pt.pfrio_esize = C.int(C.sizeof_struct_pfr_addr)
 	pt.pfrio_size = C.int(n)

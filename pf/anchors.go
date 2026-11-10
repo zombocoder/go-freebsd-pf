@@ -43,8 +43,8 @@ func (c *Client) ListAnchors(path string) ([]Anchor, error) {
 	var rs C.struct_pfioc_ruleset
 	C.memset(unsafe.Pointer(&rs), 0, C.sizeof_struct_pfioc_ruleset)
 
-	if path != "" {
-		copyStringToC(&rs.path[0], path, C.MAXPATHLEN)
+	if err := copyStringToC(&rs.path[0], "anchor", path, C.MAXPATHLEN); err != nil {
+		return nil, err
 	}
 
 	// Get count of anchors
@@ -59,9 +59,7 @@ func (c *Client) ListAnchors(path string) ([]Anchor, error) {
 	for i := uint32(0); i < count; i++ {
 		var grs C.struct_pfioc_ruleset
 		C.memset(unsafe.Pointer(&grs), 0, C.sizeof_struct_pfioc_ruleset)
-		if path != "" {
-			copyStringToC(&grs.path[0], path, C.MAXPATHLEN)
-		}
+		_ = copyStringToC(&grs.path[0], "anchor", path, C.MAXPATHLEN) // fits, checked above
 		grs.nr = C.u_int32_t(i)
 
 		rv, err := C.pf_ioctl_getruleset(C.int(c.fd), &grs)

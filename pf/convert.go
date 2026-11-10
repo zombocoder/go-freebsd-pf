@@ -28,15 +28,20 @@ var (
 	_ = [1]int{}[C.PF_NAT-pfActNAT]
 	_ = [1]int{}[C.PF_BINAT-pfActBINAT]
 	_ = [1]int{}[C.PF_RDR-pfActRDR]
+
+	_ = [1]int{}[C.IFNAMSIZ-ifNameSize]
+	_ = [1]int{}[C.PF_RULE_LABEL_SIZE-ruleLabelSize]
+	_ = [1]int{}[C.PF_TABLE_NAME_SIZE-tableNameSize]
+	_ = [1]int{}[C.MAXPATHLEN-anchorPathSize]
 )
 
 // ruleToC converts a Go Rule to C pfioc_rule struct.
-func ruleToC(r Rule, anchor string) C.struct_pfioc_rule {
+func ruleToC(r Rule, anchor string) (C.struct_pfioc_rule, error) {
 	var pr C.struct_pfioc_rule
 	C.memset(unsafe.Pointer(&pr), 0, C.sizeof_struct_pfioc_rule)
 
-	if anchor != "" {
-		copyStringToC(&pr.anchor[0], anchor, C.MAXPATHLEN)
+	if err := copyStringToC(&pr.anchor[0], "anchor", anchor, C.MAXPATHLEN); err != nil {
+		return pr, err
 	}
 
 	rule := &pr.rule
@@ -62,8 +67,8 @@ func ruleToC(r Rule, anchor string) C.struct_pfioc_rule {
 	}
 
 	// Interface
-	if r.Interface != "" {
-		copyStringToC(&rule.ifname[0], r.Interface, C.IFNAMSIZ)
+	if err := copyStringToC(&rule.ifname[0], "interface", r.Interface, C.IFNAMSIZ); err != nil {
+		return pr, err
 	}
 
 	// Protocol
@@ -90,11 +95,11 @@ func ruleToC(r Rule, anchor string) C.struct_pfioc_rule {
 	}
 
 	// Label
-	if r.Label != "" {
-		copyStringToC(&rule.label[0], r.Label, C.PF_RULE_LABEL_SIZE)
+	if err := copyStringToC(&rule.label[0], "label", r.Label, C.PF_RULE_LABEL_SIZE); err != nil {
+		return pr, err
 	}
 
-	return pr
+	return pr, nil
 }
 
 // setRuleAddr configures a pf_rule_addr from Go types.
@@ -443,16 +448,15 @@ func stateFromC(cs *C.struct_pf_state_export) State {
 }
 
 // cStateKill converts a StateFilter to a C pfioc_state_kill.
-func cStateKill(f StateFilter) C.struct_pfioc_state_kill {
+func cStateKill(f StateFilter) (C.struct_pfioc_state_kill, error) {
 	var psk C.struct_pfioc_state_kill
 	C.memset(unsafe.Pointer(&psk), 0, C.sizeof_struct_pfioc_state_kill)
 
-	if f.Interface != "" {
-		copyStringToC(&psk.psk_ifname[0], f.Interface, C.IFNAMSIZ)
+	if err := copyStringToC(&psk.psk_ifname[0], "interface", f.Interface, C.IFNAMSIZ); err != nil {
+		return psk, err
 	}
-
-	if f.Label != "" {
-		copyStringToC(&psk.psk_label[0], f.Label, C.PF_RULE_LABEL_SIZE)
+	if err := copyStringToC(&psk.psk_label[0], "label", f.Label, C.PF_RULE_LABEL_SIZE); err != nil {
+		return psk, err
 	}
 
 	if f.Source != nil {
@@ -467,7 +471,7 @@ func cStateKill(f StateFilter) C.struct_pfioc_state_kill {
 		setStateAddr(&psk.psk_dst, f.Destination)
 	}
 
-	return psk
+	return psk, nil
 }
 
 func afFromNet(ip net.IP) C.sa_family_t {

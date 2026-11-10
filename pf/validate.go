@@ -158,3 +158,31 @@ func ruleSetAction(rs RuleSet) (uint8, error) {
 	}
 	return 0, fmt.Errorf("%w: unknown rule set %d", ErrInvalidArgument, rs)
 }
+
+// Sizes of the C char arrays strings are copied into (including the NUL),
+// from <net/if.h> and <netpfil/pf/pf.h>; convert.go checks them against
+// the headers at compile time.
+const (
+	ifNameSize     = 16   // IFNAMSIZ
+	ruleLabelSize  = 64   // PF_RULE_LABEL_SIZE
+	tableNameSize  = 32   // PF_TABLE_NAME_SIZE
+	anchorPathSize = 1024 // MAXPATHLEN
+)
+
+// checkCString reports whether s fits a C char[size] including its NUL.
+// Strings are never truncated: a cut interface name, label or anchor would
+// make the kernel act on a different object than the caller named.
+func checkCString(field, s string, size int) error {
+	if len(s) >= size {
+		return fmt.Errorf("%w: %s %q is too long (max %d bytes)", ErrInvalidArgument, field, s, size-1)
+	}
+	return nil
+}
+
+// validateStateFilter checks the string fields of a StateFilter.
+func validateStateFilter(f StateFilter) error {
+	if err := checkCString("interface", f.Interface, ifNameSize); err != nil {
+		return err
+	}
+	return checkCString("label", f.Label, ruleLabelSize)
+}

@@ -786,24 +786,30 @@ func getAddrWrapTblname(aw *C.struct_pf_addr_wrap) string {
 }
 
 // cPfrTable converts a Go Table to a C pfr_table.
-func cPfrTable(t Table) C.struct_pfr_table {
+func cPfrTable(t Table) (C.struct_pfr_table, error) {
 	var ct C.struct_pfr_table
-	copyStringToC(&ct.pfrt_name[0], t.Name, C.PF_TABLE_NAME_SIZE)
-	copyStringToC(&ct.pfrt_anchor[0], t.Anchor, C.MAXPATHLEN)
+	if err := copyStringToC(&ct.pfrt_name[0], "table name", t.Name, C.PF_TABLE_NAME_SIZE); err != nil {
+		return ct, err
+	}
+	if err := copyStringToC(&ct.pfrt_anchor[0], "anchor", t.Anchor, C.MAXPATHLEN); err != nil {
+		return ct, err
+	}
 	ct.pfrt_flags = C.u_int32_t(t.Flags)
-	return ct
+	return ct, nil
 }
 
-// copyStringToC copies a Go string into a C char array.
-func copyStringToC(dst *C.char, src string, maxLen C.int) {
-	if len(src) == 0 {
-		return
+// copyStringToC copies a Go string into a zeroed C char[size]. A string
+// that does not fit with its NUL is rejected with ErrInvalidArgument
+// instead of being truncated.
+func copyStringToC(dst *C.char, field, src string, size C.int) error {
+	if err := checkCString(field, src, int(size)); err != nil {
+		return err
 	}
-	n := len(src)
-	if n >= int(maxLen) {
-		n = int(maxLen) - 1
+	if len(src) == 0 {
+		return nil
 	}
 	cstr := C.CString(src)
 	defer C.free(unsafe.Pointer(cstr))
-	C.strncpy(dst, cstr, C.size_t(n))
+	C.strncpy(dst, cstr, C.size_t(len(src)))
+	return nil
 }

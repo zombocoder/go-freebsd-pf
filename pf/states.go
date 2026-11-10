@@ -25,6 +25,9 @@ import (
 // ListStates returns PF state table entries matching the filter.
 // An empty filter returns all states.
 func (c *Client) ListStates(filter StateFilter) ([]State, error) {
+	if err := validateStateFilter(filter); err != nil {
+		return nil, err
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if err := c.checkClosed(); err != nil {
@@ -80,7 +83,10 @@ func (c *Client) ClearStates(filter StateFilter) (int, error) {
 		return 0, err
 	}
 
-	psk := cStateKill(filter)
+	psk, err := cStateKill(filter)
+	if err != nil {
+		return 0, err
+	}
 	if err := ioctlClearStates(c.fd, &psk); err != nil {
 		return 0, err
 	}
@@ -97,7 +103,10 @@ func (c *Client) KillStates(filter StateFilter) (int, error) {
 		return 0, err
 	}
 
-	psk := cStateKill(filter)
+	psk, err := cStateKill(filter)
+	if err != nil {
+		return 0, err
+	}
 	if err := ioctlKillStates(c.fd, &psk); err != nil {
 		return 0, err
 	}

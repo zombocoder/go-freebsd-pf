@@ -94,8 +94,10 @@ func (c *Client) Begin(anchor string, rulesets ...RuleSet) (*Transaction, error)
 	for i, rs := range rulesets {
 		elem := C.trans_elem(tx.ctrans, C.int(i))
 		elem.rs_num = C.int(rs)
-		if anchor != "" {
-			copyStringToC(&elem.anchor[0], anchor, C.MAXPATHLEN)
+		if err := copyStringToC(&elem.anchor[0], "anchor", anchor, C.MAXPATHLEN); err != nil {
+			C.free_trans(tx.ctrans)
+			tx.ctrans = nil
+			return nil, err
 		}
 	}
 
@@ -125,7 +127,10 @@ func (tx *Transaction) AddRule(rule Rule) error {
 	tx.client.mu.Lock()
 	defer tx.client.mu.Unlock()
 
-	pr := ruleToC(rule, tx.anchor)
+	pr, err := ruleToC(rule, tx.anchor)
+	if err != nil {
+		return err
+	}
 	elem := C.trans_elem(tx.ctrans, 0)
 	pr.ticket = elem.ticket
 	poolTicket, err := ioctlBeginAddrs(tx.client.fd)

@@ -319,3 +319,33 @@ func TestRuleSetAction(t *testing.T) {
 		}
 	}
 }
+
+func TestCheckCString(t *testing.T) {
+	if err := checkCString("interface", "tap0", 16); err != nil {
+		t.Fatalf("short name: %v", err)
+	}
+	if err := checkCString("interface", strings.Repeat("a", 15), 16); err != nil {
+		t.Fatalf("15 chars fit IFNAMSIZ 16 with the NUL: %v", err)
+	}
+	err := checkCString("interface", strings.Repeat("a", 16), 16)
+	if !errors.Is(err, ErrInvalidArgument) || !strings.Contains(err.Error(), "interface") {
+		t.Fatalf("16 chars: err = %v; want ErrInvalidArgument naming the field", err)
+	}
+	if err := checkCString("label", strings.Repeat("l", 64), 64); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("64-char label: err = %v; want ErrInvalidArgument", err)
+	}
+}
+
+func TestValidateStateFilter(t *testing.T) {
+	if err := validateStateFilter(StateFilter{Interface: "tap0", Label: "x"}); err != nil {
+		t.Fatalf("valid filter: %v", err)
+	}
+	for _, f := range []StateFilter{
+		{Interface: strings.Repeat("t", 16)},
+		{Label: strings.Repeat("l", 64)},
+	} {
+		if err := validateStateFilter(f); !errors.Is(err, ErrInvalidArgument) {
+			t.Errorf("validateStateFilter(%+v) = %v; want ErrInvalidArgument", f, err)
+		}
+	}
+}
