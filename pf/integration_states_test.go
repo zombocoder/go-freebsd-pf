@@ -83,9 +83,11 @@ func safetyNet() {
 	for _, a := range []string{rulesAnchor, statesAnchor, testAnchor} {
 		_ = exec.Command("pfctl", "-a", a, "-F", "rules").Run()
 	}
+	natSafetyNet()
 	if pfEnabledByUs {
 		_ = exec.Command("pfctl", "-d").Run()
 		_ = exec.Command("pfctl", "-F", "rules").Run()
+		_ = exec.Command("pfctl", "-F", "nat").Run()
 		pfEnabledByUs = false
 	}
 }

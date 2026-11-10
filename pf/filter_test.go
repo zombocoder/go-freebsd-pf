@@ -143,3 +143,81 @@ func TestStatesNext(t *testing.T) {
 		}
 	}
 }
+
+func TestMatchesFilterNAT(t *testing.T) {
+	// An outbound NAT state as pfctl -ss shows it: the wire key carries
+	// the translated address, the stack key the guest's own.
+	guest, ext, remote := net.ParseIP("10.77.0.2"), net.ParseIP("192.0.2.9"), net.ParseIP("198.51.100.7")
+	s := State{
+		Interface: "all", OrigInterface: "re0", Direction: DirectionOut,
+		Source: ext, Destination: remote,
+		natSource: guest, natDestination: remote,
+	}
+	tests := []struct {
+		name string
+		f    StateFilter
+		want bool
+	}{
+		{"guest source, wire key", StateFilter{Source: mustCIDR(t, "10.77.0.2/32")}, false},
+		{"guest source, NAT key", StateFilter{NAT: true, Source: mustCIDR(t, "10.77.0.2/32")}, true},
+		{"external source, wire key", StateFilter{Source: mustCIDR(t, "192.0.2.9/32")}, true},
+		{"external source, NAT key", StateFilter{NAT: true, Source: mustCIDR(t, "192.0.2.9/32")}, false},
+		{"destination, NAT key", StateFilter{NAT: true, Destination: mustCIDR(t, "198.51.100.7/32")}, true},
+		{"NAT without addresses", StateFilter{NAT: true}, true},
+		{"KillMatch does not filter", StateFilter{KillMatch: true, Source: mustCIDR(t, "192.0.2.9/32")}, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := matchesFilter(s, tc.f); got != tc.want {
+				t.Fatalf("matchesFilter = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// pfKeyBytes lays out a pf_state_key_export address pair the way the kernel
+// exports it: two 16-byte pf_addr slots.
+func pfKeyBytes(a0, a1 string) (b [32]byte) {
+	copy(b[0:], net.ParseIP(a0).To16()[12:])
+	copy(b[16:], net.ParseIP(a1).To16()[12:])
+	return
+}
+
+func TestDecodeStateKey(t *testing.T) {
+	// A translated state keeps distinct wire and stack keys. Keys are in
+	// inbound orientation: slot 0 is the initiator for "in", slot 1 for "out".
+	wire := pfKeyBytes("198.51.100.7", "192.0.2.9")  // remote, translated
+	stack := pfKeyBytes("198.51.100.7", "10.77.0.2") // remote, guest
+	wp, sp := [2]uint16{9999, 54000}, [2]uint16{9999, 32000}
+
+	src, dst, sport, dport := decodeStateKey(AddressFamilyIPv4, wire, wp, DirectionOut)
+	if !src.Equal(net.ParseIP("192.0.2.9")) || !dst.Equal(net.ParseIP("198.51.100.7")) || sport != 54000 || dport != 9999 {
+		t.Errorf("wire/out = %v:%d -> %v:%d", src, sport, dst, dport)
+	}
+	src, _, sport, _ = decodeStateKey(AddressFamilyIPv4, stack, sp, DirectionOut)
+	if !src.Equal(net.ParseIP("10.77.0.2")) || sport != 32000 {
+		t.Errorf("stack/out src = %v:%d, want 10.77.0.2:32000", src, sport)
+	}
+
+	// Inbound: slot 0 initiates.
+	in := pfKeyBytes("10.77.0.2", "198.51.100.7")
+	src, dst, sport, dport = decodeStateKey(AddressFamilyIPv4, in, [2]uint16{32000, 9999}, DirectionIn)
+	if !src.Equal(net.ParseIP("10.77.0.2")) || !dst.Equal(net.ParseIP("198.51.100.7")) || sport != 32000 || dport != 9999 {
+		t.Errorf("stack/in = %v:%d -> %v:%d", src, sport, dst, dport)
+	}
+
+	// IPv6 uses all 16 bytes of each slot.
+	var b6 [32]byte
+	copy(b6[0:], net.ParseIP("2001:db8::1"))
+	copy(b6[16:], net.ParseIP("2001:db8::2"))
+	src, dst, _, _ = decodeStateKey(AddressFamilyIPv6, b6, [2]uint16{}, DirectionIn)
+	if !src.Equal(net.ParseIP("2001:db8::1")) || !dst.Equal(net.ParseIP("2001:db8::2")) {
+		t.Errorf("v6 = %v -> %v", src, dst)
+	}
+
+	// An unknown family yields no addresses, so no filter matches it.
+	src, dst, _, _ = decodeStateKey(0, wire, wp, DirectionIn)
+	if src != nil || dst != nil {
+		t.Errorf("unknown af = %v, %v; want nil", src, dst)
+	}
+}

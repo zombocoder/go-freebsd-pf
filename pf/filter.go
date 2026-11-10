@@ -19,10 +19,14 @@ func matchesFilter(s State, f StateFilter) bool {
 	if f.Interface != "" && stateKillInterface(s) != f.Interface {
 		return false
 	}
-	if f.Source != nil && !f.Source.Contains(s.Source) {
+	src, dst := s.Source, s.Destination
+	if f.NAT {
+		src, dst = s.natSource, s.natDestination
+	}
+	if f.Source != nil && !f.Source.Contains(src) {
 		return false
 	}
-	if f.Destination != nil && !f.Destination.Contains(s.Destination) {
+	if f.Destination != nil && !f.Destination.Contains(dst) {
 		return false
 	}
 	return true
@@ -46,6 +50,25 @@ func orientWireKey(dir Direction, addr [2]net.IP, port [2]uint16) (src, dst net.
 		return addr[1], addr[0], port[1], port[0]
 	}
 	return addr[0], addr[1], port[0], port[1]
+}
+
+// decodeStateKey reads the two addresses (raw pf_addr slots, 16 bytes each)
+// and ports (host order) of a pf_state_key_export as initiator/responder.
+// af is the family of the state as exported: pf_state_export carries only
+// the wire family, which is what both keys are read with (see
+// StateFilter.NAT for the af-to consequence). An unknown family yields nil
+// addresses.
+func decodeStateKey(af AddressFamily, raw [32]byte, ports [2]uint16, dir Direction) (src, dst net.IP, sport, dport uint16) {
+	var addrs [2]net.IP
+	switch af {
+	case AddressFamilyIPv4:
+		addrs[0] = net.IPv4(raw[0], raw[1], raw[2], raw[3])
+		addrs[1] = net.IPv4(raw[16], raw[17], raw[18], raw[19])
+	case AddressFamilyIPv6:
+		addrs[0] = append(net.IP(nil), raw[0:16]...)
+		addrs[1] = append(net.IP(nil), raw[16:32]...)
+	}
+	return orientWireKey(dir, addrs, ports)
 }
 
 // ntohl converts a 32-bit value the kernel stored in network byte order

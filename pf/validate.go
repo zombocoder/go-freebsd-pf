@@ -206,3 +206,18 @@ func validateStateFilter(f StateFilter) error {
 	}
 	return checkCString("label", f.Label, ruleLabelSize)
 }
+
+// checkKillFlags refuses the StateFilter flags the kernel path in use
+// cannot honor, instead of silently ignoring them. NAT needs FreeBSD 15
+// (13.x/14.x have no psk_nat and their nvlist parser ignores "nat"); the
+// fixed-struct DIOCKILLSTATES/DIOCCLRSTATES carry no kill-match flag, so
+// KillMatch needs the nvlist ioctls.
+func checkKillFlags(f StateFilter, natOK, killMatchOK bool) error {
+	if f.NAT && !natOK {
+		return fmt.Errorf("%w: matching the NAT key when killing states needs FreeBSD 15", ErrNotSupported)
+	}
+	if f.KillMatch && !killMatchOK {
+		return fmt.Errorf("%w: kill-match needs the nvlist state ioctls (FreeBSD 15, or a build with GOPF_FORCE_NV)", ErrNotSupported)
+	}
+	return nil
+}

@@ -6,6 +6,20 @@ follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `StateFilter.NAT`: match `Source` and `Destination` against the state's NAT
+  (stack-side) key, as `pfctl -k nat`. NAT states are keyed on the wire by
+  the post-translation address, so killing the states of a NATed guest
+  address needed this; `ListStates` honors it too and `ClearStates` ignores
+  it. FreeBSD 15 only (nvlist key `nat`); 13.x/14.x return `ErrNotSupported`
+  instead of matching the wrong key. Not reliable for af-to (nat64) states in
+  `ListStates`: the kernel exports only the wire address family.
+- `StateFilter.KillMatch`: also kill the peer state of each matched state, as
+  `pfctl -M` (`kill_match`). Needs the nvlist ioctls (FreeBSD 15, or
+  `GOPF_FORCE_NV`); the fixed-struct ioctls return `ErrNotSupported`. The
+  nvlist path previously always sent `kill_match` false.
+
 ## [0.3.0] - 2026-11-10
 
 ### Added
