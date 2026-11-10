@@ -19,7 +19,7 @@ static void set_states_v2_buf(struct pfioc_states_v2 *ps, void *buf) {
 */
 import "C"
 import (
-	"fmt"
+	"syscall"
 	"unsafe"
 )
 
@@ -49,32 +49,43 @@ func (c *Client) ListStates(filter StateFilter) ([]State, error) {
 	}
 
 	// The kernel fills the buffer row by row and stops quietly at the
-	// first hash row that does not fit, so over-allocate and retry with a
-	// larger buffer while the reply leaves too little head-room.
+	// first hash row that does not fit (no error, no required size), so
+	// over-allocate and accept a listing only when it leaves room to spare
+	// and a second pass returns the same size (see statesNext).
 	bufLen := statesBufLen(int(ps.ps_len), entry)
 	var buf unsafe.Pointer
 	defer func() { C.free(buf) }()
-	for attempt := 0; ; attempt++ {
-		C.free(buf)
-		buf = C.malloc(C.size_t(bufLen))
-		if buf == nil {
-			return nil, &OpError{Op: "ListStates", Err: ErrInvalidArgument}
+	prev := -1
+	for pass := 0; ; pass++ {
+		if pass == statesMaxPasses {
+			return nil, &OpError{Op: "ListStates", Err: ErrStatesIncomplete}
 		}
-		ps.ps_len = C.int(bufLen)
+		C.free(buf)
+		buf = C.calloc(C.size_t(bufLen/entry), C.size_t(entry))
+		if buf == nil {
+			return nil, &OpError{Op: "ListStates", Err: syscall.ENOMEM}
+		}
+		ps.ps_len = C.int(bufLen) // bufLen <= statesMaxLen < MaxInt32
 		C.set_states_v2_buf(&ps, buf)
 		if err := ioctlGetStatesV2(c.fd, &ps); err != nil {
 			return nil, err
 		}
-		if !statesMaybeTruncated(int(ps.ps_len), bufLen, entry) {
+		returned := int(ps.ps_len)
+		done, next, err := statesNext(prev, returned, bufLen, entry)
+		if err != nil {
+			return nil, &OpError{Op: "ListStates", Err: err}
+		}
+		if done {
 			break
 		}
-		if attempt == 8 {
-			return nil, &OpError{Op: "ListStates", Err: fmt.Errorf("state table keeps growing beyond %d bytes", bufLen)}
+		prev = -1
+		if bufLen-returned >= statesSlack*entry {
+			prev = returned
 		}
-		bufLen = max(bufLen*2, statesBufLen(int(ps.ps_len), entry))
+		bufLen = next
 	}
 
-	count := int(ps.ps_len) / int(C.sizeof_struct_pf_state_export)
+	count := int(ps.ps_len) / entry
 	states := make([]State, 0, count)
 
 	for i := 0; i < count; i++ {

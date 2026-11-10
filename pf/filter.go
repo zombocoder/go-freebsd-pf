@@ -2,6 +2,8 @@ package pf
 
 import (
 	"encoding/binary"
+	"fmt"
+	"math"
 	"net"
 )
 
@@ -61,23 +63,71 @@ func be64toh(v uint64) uint64 {
 	return binary.BigEndian.Uint64(b[:])
 }
 
-// statesSlack is the head-room, in entries, ListStates leaves in its
-// DIOCGETSTATESV2 buffer. The kernel copies whole hash rows and stops
-// (without an error) at the first row that does not fit, so a reply that
-// leaves less than this much room may have been cut short.
-const statesSlack = 16
+// DIOCGETSTATESV2 buffer sizing.
+//
+// The kernel (pf_ioctl.c on 13.x, 14.x and 15.x alike) copies whole hash
+// rows and, at the first row that does not fit, stops and returns success
+// with ps_len set to the bytes written. There is no "buffer too small"
+// signal, so completeness is decided by statesNext: a reply counts as
+// complete only when it leaves statesSlack entries of room and a second
+// pass returns the same size.
+const (
+	statesSlack = 16
+	// statesMaxBytes caps the buffer (about 700k states); ps_len is a C int.
+	statesMaxBytes = 256 << 20
+	// statesMaxPasses bounds the retries before ListStates gives up.
+	statesMaxPasses = 10
+)
+
+// statesMaxLen is the largest buffer used: statesMaxBytes (and MaxInt32)
+// rounded down to a whole number of entries.
+func statesMaxLen(entry int) int {
+	m := statesMaxBytes
+	if m > math.MaxInt32 {
+		m = math.MaxInt32
+	}
+	return m - m%entry
+}
 
 // statesBufLen returns the buffer size for DIOCGETSTATESV2 given the
 // kernel's size probe (bytes): 25% more entries than probed plus slack,
-// since states keep being created between the probe and the copy.
+// since states keep being created between the probe and the copy. The
+// result is a multiple of entry and at most statesMaxLen.
 func statesBufLen(probe, entry int) int {
+	if probe < 0 {
+		probe = 0
+	}
+	maxLen := statesMaxLen(entry)
 	n := probe / entry
-	return (n*5/4 + statesSlack) * entry
+	if n > maxLen/entry {
+		return maxLen
+	}
+	l := (n*5/4 + statesSlack) * entry
+	if l > maxLen {
+		return maxLen
+	}
+	return l
 }
 
-// statesMaybeTruncated reports whether a DIOCGETSTATESV2 reply of returned
-// bytes into a bufLen buffer may be missing states and must be retried
-// with a larger buffer.
-func statesMaybeTruncated(returned, bufLen, entry int) bool {
-	return bufLen-returned < statesSlack*entry
+// statesNext decides what to do after a DIOCGETSTATESV2 pass that wrote
+// returned bytes into a bufLen buffer. prev is the size returned by the
+// previous pass if that pass had room to spare, or -1. It reports whether
+// the listing is complete, else the buffer size for the next pass, or an
+// error for a malformed reply or a table that cannot fit.
+func statesNext(prev, returned, bufLen, entry int) (done bool, next int, err error) {
+	if returned < 0 || returned > bufLen || returned%entry != 0 {
+		return false, 0, fmt.Errorf("%w: kernel returned %d bytes for a %d-byte buffer", ErrInvalidArgument, returned, bufLen)
+	}
+	maxLen := statesMaxLen(entry)
+	if bufLen-returned >= statesSlack*entry {
+		if prev == returned {
+			return true, 0, nil
+		}
+		// Room to spare but not confirmed yet: repeat (same or larger size).
+		return false, max(bufLen, statesBufLen(returned, entry)), nil
+	}
+	if bufLen >= maxLen {
+		return false, 0, fmt.Errorf("%w: more than %d bytes of states", ErrStatesIncomplete, maxLen)
+	}
+	return false, min(max(bufLen*2, statesBufLen(returned, entry)), maxLen), nil
 }

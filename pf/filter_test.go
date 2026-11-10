@@ -2,6 +2,7 @@ package pf
 
 import (
 	"encoding/binary"
+	"math"
 	"net"
 	"testing"
 )
@@ -85,35 +86,60 @@ func TestNetworkOrder(t *testing.T) {
 
 func TestStatesBufLen(t *testing.T) {
 	const e = 384 // sizeof(struct pf_state_export)
+	max := statesMaxLen(e)
+	if max%e != 0 || max > 256<<20 || max > math.MaxInt32 {
+		t.Fatalf("statesMaxLen = %d: not a bounded multiple of %d", max, e)
+	}
 	if got, want := statesBufLen(0, e), 16*e; got != want {
 		t.Errorf("statesBufLen(0) = %d, want %d", got, want)
+	}
+	if got, want := statesBufLen(-5, e), 16*e; got != want {
+		t.Errorf("statesBufLen(negative) = %d, want %d", got, want)
 	}
 	// probe of 100 states -> 125 + 16 entries
 	if got, want := statesBufLen(100*e, e), 141*e; got != want {
 		t.Errorf("statesBufLen(100 entries) = %d, want %d", got, want)
 	}
-	// Never smaller than the previous buffer when growing.
-	if got := statesBufLen(1000*e, e); got < 1000*e {
-		t.Errorf("statesBufLen shrank: %d", got)
+	// Clamped, still a multiple of the entry size.
+	if got := statesBufLen(math.MaxInt32, e); got != max {
+		t.Errorf("statesBufLen(MaxInt32) = %d, want clamp %d", got, max)
 	}
 }
 
-func TestStatesMaybeTruncated(t *testing.T) {
+func TestStatesNext(t *testing.T) {
 	const e = 384
 	buf := 141 * e
-	cases := []struct {
-		returned int
-		want     bool
-	}{
-		{0, false},
-		{100 * e, false},    // plenty of room left
-		{buf - 16*e, false}, // exactly the slack: still complete
-		{buf - 15*e, true},  // less than the slack left: a row may not have fit
-		{buf, true},         // full
+	max := statesMaxLen(e)
+
+	// First roomy pass: not trusted yet, repeat to confirm.
+	done, next, err := statesNext(-1, 100*e, buf, e)
+	if done || err != nil || next < buf {
+		t.Fatalf("first roomy pass: done=%v next=%d err=%v; want a confirming pass", done, next, err)
 	}
-	for _, tc := range cases {
-		if got := statesMaybeTruncated(tc.returned, buf, e); got != tc.want {
-			t.Errorf("statesMaybeTruncated(%d of %d) = %v, want %v", tc.returned, buf, got, tc.want)
+	// Second roomy pass with the same count: complete.
+	if done, _, err := statesNext(100*e, 100*e, buf, e); !done || err != nil {
+		t.Fatalf("confirmed pass: done=%v err=%v; want done", done, err)
+	}
+	// Same count but no room left: a row may not have fitted, grow.
+	done, next, err = statesNext(buf-8*e, buf-8*e, buf, e)
+	if done || err != nil || next <= buf {
+		t.Fatalf("tight pass: done=%v next=%d err=%v; want a larger buffer", done, next, err)
+	}
+	// Count changed: not stable, retry.
+	if done, _, err := statesNext(90*e, 100*e, buf, e); done || err != nil {
+		t.Fatalf("changed count: done=%v err=%v; want retry", done, err)
+	}
+	// Growth is clamped; at the cap with no room left it is an error.
+	if _, next, _ := statesNext(-1, max/2, max/2+e, e); next > max {
+		t.Fatalf("next %d exceeds cap %d", next, max)
+	}
+	if _, _, err := statesNext(-1, max, max, e); err == nil {
+		t.Fatal("full buffer at the cap: want an error, not a short list")
+	}
+	// Malformed replies are rejected before any entry is read.
+	for _, ret := range []int{-e, buf + e, 100*e + 1} {
+		if _, _, err := statesNext(-1, ret, buf, e); err == nil {
+			t.Errorf("returned %d of %d: want an error", ret, buf)
 		}
 	}
 }

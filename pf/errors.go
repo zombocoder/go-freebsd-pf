@@ -42,6 +42,13 @@ var (
 	// for DIOCSTART, DIOCSTOP and DIOCGETSTATESV2 when the kernel is
 	// built without "options COMPAT_FREEBSD14" (GENERIC has it).
 	ErrNotSupported = errors.New("pf: operation not supported by this kernel")
+
+	// ErrStatesIncomplete is returned by ListStates when it cannot confirm
+	// a complete listing (the state table kept changing between passes or
+	// is larger than the 256 MiB buffer limit). The kernel gives no signal
+	// when its reply is cut short, so ListStates returns this instead of a
+	// possibly incomplete list; retrying later usually succeeds.
+	ErrStatesIncomplete = errors.New("pf: could not list the complete state table")
 )
 
 // OpError describes a failed PF ioctl operation.
