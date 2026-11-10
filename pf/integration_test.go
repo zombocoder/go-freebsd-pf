@@ -57,17 +57,10 @@ func TestEnableDisable(t *testing.T) {
 	c := openClient(t)
 	defer c.Close()
 
-	// Record the original state so we can restore it.
-	origStatus, err := c.Status()
-	if err != nil {
-		t.Fatalf("Status: %v", err)
-	}
-
-	// Try to enable PF. If it is already enabled, Enable may return an
-	// error on some kernels -- tolerate "already enabled" style errors.
-	if err := c.Enable(); err != nil {
-		t.Skipf("cannot modify PF state (Enable failed): %v", err)
-	}
+	// enableSafePF skips unless PF is disabled with an empty main
+	// ruleset, loads a pass-all ruleset, enables PF and restores the
+	// original "disabled, no ruleset" state on cleanup.
+	enableSafePF(t, c)
 
 	status, err := c.Status()
 	if err != nil {
@@ -87,13 +80,6 @@ func TestEnableDisable(t *testing.T) {
 	}
 	if status.Running {
 		t.Error("expected PF to be stopped after Disable")
-	}
-
-	// Restore original state.
-	if origStatus.Running {
-		if err := c.Enable(); err != nil {
-			t.Fatalf("failed to restore PF to running state: %v", err)
-		}
 	}
 }
 
