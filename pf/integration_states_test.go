@@ -4,6 +4,7 @@ package pf
 
 import (
 	"bytes"
+	"errors"
 	"net"
 	"os"
 	"os/exec"
@@ -251,6 +252,11 @@ func TestListRulesInAnchor(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Fatalf("expected 0 rules after ClearRules, got %d", len(got))
+	}
+
+	// A bad rule set selector must not be mistaken for a missing anchor.
+	if _, err := c.ListRules(RuleQuery{Anchor: rulesAnchor, RuleSet: 42}); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("ListRules(RuleSet 42) err = %v; want ErrInvalidArgument", err)
 	}
 }
 

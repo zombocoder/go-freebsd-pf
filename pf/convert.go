@@ -20,6 +20,16 @@ import (
 	"unsafe"
 )
 
+// The ruleset-selecting actions in validate.go must match the header; a
+// mismatch makes one of these constant indexes out of range at compile time.
+var (
+	_ = [1]int{}[C.PF_PASS-pfActPass]
+	_ = [1]int{}[C.PF_SCRUB-pfActScrub]
+	_ = [1]int{}[C.PF_NAT-pfActNAT]
+	_ = [1]int{}[C.PF_BINAT-pfActBINAT]
+	_ = [1]int{}[C.PF_RDR-pfActRDR]
+)
+
 // ruleToC converts a Go Rule to C pfioc_rule struct.
 func ruleToC(r Rule, anchor string) C.struct_pfioc_rule {
 	var pr C.struct_pfioc_rule

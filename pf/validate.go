@@ -127,3 +127,34 @@ func ValidateTableName(name string) error {
 	}
 	return nil
 }
+
+// Rule actions from <netpfil/pf/pf.h> used to select a ruleset in
+// DIOCGETRULES/DIOCGETRULE (the kernel's pf_get_ruleset_number). They have
+// not changed since PF was imported; convert.go checks them against the
+// header at compile time.
+const (
+	pfActPass  = 0 // PF_PASS  -> PF_RULESET_FILTER
+	pfActScrub = 2 // PF_SCRUB -> PF_RULESET_SCRUB
+	pfActNAT   = 4 // PF_NAT   -> PF_RULESET_NAT
+	pfActBINAT = 6 // PF_BINAT -> PF_RULESET_BINAT
+	pfActRDR   = 8 // PF_RDR   -> PF_RULESET_RDR
+)
+
+// ruleSetAction returns the rule action that selects rs in DIOCGETRULES.
+// An unknown RuleSet is rejected here, so an EINVAL from the kernel can
+// only mean a missing anchor.
+func ruleSetAction(rs RuleSet) (uint8, error) {
+	switch rs {
+	case RuleSetScrub:
+		return pfActScrub, nil
+	case RuleSetFilter:
+		return pfActPass, nil
+	case RuleSetNAT:
+		return pfActNAT, nil
+	case RuleSetBINAT:
+		return pfActBINAT, nil
+	case RuleSetRDR:
+		return pfActRDR, nil
+	}
+	return 0, fmt.Errorf("%w: unknown rule set %d", ErrInvalidArgument, rs)
+}

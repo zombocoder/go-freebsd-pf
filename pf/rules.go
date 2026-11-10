@@ -18,11 +18,18 @@ import (
 	"unsafe"
 )
 
-// ListRules retrieves the rules matching the given query.
+// ListRules retrieves the rules matching the given query. An unknown
+// query.RuleSet returns ErrInvalidArgument; an anchor that does not exist
+// has no rules.
 func (c *Client) ListRules(query RuleQuery) ([]Rule, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if err := c.checkClosed(); err != nil {
+		return nil, err
+	}
+
+	action, err := ruleSetAction(query.RuleSet)
+	if err != nil {
 		return nil, err
 	}
 
@@ -32,7 +39,7 @@ func (c *Client) ListRules(query RuleQuery) ([]Rule, error) {
 	if query.Anchor != "" {
 		copyStringToC(&pr.anchor[0], query.Anchor, C.MAXPATHLEN)
 	}
-	pr.rule.action = C.u_int8_t(query.RuleSet)
+	pr.rule.action = C.u_int8_t(action)
 
 	if err := ioctlGetRules(c.fd, &pr); err != nil {
 		// The kernel answers EINVAL for an anchor that does not exist
@@ -58,7 +65,7 @@ func (c *Client) ListRules(query RuleQuery) ([]Rule, error) {
 		gr.ticket = ticket
 		gr.nr = C.u_int32_t(i)
 		// Same ruleset selector as DIOCGETRULES, so the ticket matches.
-		gr.rule.action = C.u_int8_t(query.RuleSet)
+		gr.rule.action = C.u_int8_t(action)
 
 		if err := ioctlGetRule(c.fd, &gr); err != nil {
 			return rules, err

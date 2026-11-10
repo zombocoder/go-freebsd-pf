@@ -296,3 +296,26 @@ func TestValidatePort(t *testing.T) {
 		}
 	})
 }
+
+func TestRuleSetAction(t *testing.T) {
+	// DIOCGETRULES/DIOCGETRULE select the ruleset through a rule action
+	// (pf_get_ruleset_number): pass->filter, scrub->scrub, nat, binat, rdr.
+	want := map[RuleSet]uint8{
+		RuleSetScrub:  pfActScrub,
+		RuleSetFilter: pfActPass,
+		RuleSetNAT:    pfActNAT,
+		RuleSetBINAT:  pfActBINAT,
+		RuleSetRDR:    pfActRDR,
+	}
+	for rs, act := range want {
+		got, err := ruleSetAction(rs)
+		if err != nil || got != act {
+			t.Errorf("ruleSetAction(%d) = %d, %v; want %d", rs, got, err, act)
+		}
+	}
+	for _, rs := range []RuleSet{-1, 5, 100} {
+		if _, err := ruleSetAction(rs); !errors.Is(err, ErrInvalidArgument) {
+			t.Errorf("ruleSetAction(%d) err = %v; want ErrInvalidArgument", rs, err)
+		}
+	}
+}
