@@ -38,13 +38,27 @@ state-table search/insert/removal counters and the ruleset checksum.
 | `Begin(anchor, rulesets...)`, `Transaction.AddRule/Commit/Rollback` | ✅ `DIOCXBEGIN`, `DIOCBEGINADDRS`, `DIOCADDRULE`, `DIOCXCOMMIT`/`DIOCXROLLBACK` | ✅ same |
 | `ReplaceRules(anchor, rules)`     | ✅ (transaction)              | ✅ (transaction)                |
 | `ClearRules(anchor, ruleset)`     | ✅ (empty transaction)        | ✅ (empty transaction)          |
+| `MainRulesetHasAnchor(path)`      | ✅ `DIOCGETRULES`/`DIOCGETRULE` (main filter ruleset, `anchor_call`) | ✅ `DIOCGETRULENV` |
 | `ListAnchors(path)`               | ✅ `DIOCGETRULESETS`/`DIOCGETRULESET` | ✅ same                 |
 | `Client.AddRule(rule)` (deprecated) | ❌ see note                 | ❌ see note                     |
 | `ValidateRule`, `ValidateTableName` | ✅ (pure Go)               | ✅ (pure Go)                    |
 
 Rule fields: action (pass/block/match), direction, interface, protocol,
 address family, source/destination as address, CIDR, table or any (with
-negation), port operators and ranges, quick, log, keep state, label, anchor.
+negation), port operators and ranges, quick, log, keep state, label, anchor,
+block policy (`BlockPolicy`: drop, return, return-rst, return-icmp; block
+rules only; return-rst needs TCP), `Rtable` (nil = no `rtable` option),
+`TCPFlags` (`flags S/SA` via `FlagsSA()`; TCP only), `ICMPType`/`ICMPCode`,
+and dynamic interface addresses (`Address{Interface: "self"}`, with
+`IfaceFlags` network/broadcast/peer/noalias). The address family is inferred
+from the addresses when `AF` is unset; contradicting families are rejected.
+`ListRules` reports `Rule.AnchorCall` for anchor rules. Custom return-icmp
+codes and a return-rst TTL are not settable and read back as the bare policy.
+`KeepState` does not add pfctl's default `flags S/SA`; set
+`TCPFlags: FlagsSA()` on TCP pass rules. `TCPFlags` and ICMP type/code on the
+wrong protocol are rejected (pfctl drops them silently); ICMP/ICMPv6 imply
+inet/inet6. Dynamic interface addresses take no `/N` prefix.
+`MainRulesetHasAnchor` ignores one leading `/`; `x` and `x/*` differ.
 `ListRules` also returns the rule number and per-rule evaluations, packets
 and bytes. `ListRules` on an anchor that does not exist returns no rules.
 

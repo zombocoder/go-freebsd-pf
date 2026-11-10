@@ -67,6 +67,8 @@ func main() {
 - **Enable/Disable PF** -- Start and stop the packet filter
 - **Status** -- Query PF status, counters, and debug level
 - **Rules** -- List, add, and manage filter rules with full support for addresses, ports, protocols, and options
+- **Rule options** -- Block policy (`BlockPolicy`: drop, return, return-rst, return-icmp), `Rtable`, TCP flags (`TCPFlags`, `FlagsSA()`), ICMP type/code, dynamic interface addresses (`Address{Interface: "self"}`), address family inferred from the addresses
+- **Anchor hook check** -- `Client.MainRulesetHasAnchor(path)` tells whether the main ruleset calls an anchor
 - **Tables** -- Create, delete, and manage PF tables and their address entries
 - **States** -- List, clear, and kill state table entries with filtering support
 - **Transactions** -- Atomic ruleset replacement via DIOCXBEGIN/DIOCXCOMMIT/DIOCXROLLBACK

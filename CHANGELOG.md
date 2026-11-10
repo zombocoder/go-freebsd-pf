@@ -6,6 +6,55 @@ follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `Rule.BlockPolicy` (`BlockPolicyDrop`, `BlockPolicyReturn`,
+  `BlockPolicyReturnRST`, `BlockPolicyReturnICMP`): `block return`,
+  `block return-rst` and `block return-icmp`, with the `rule_flag` and
+  `return_icmp`/`return_icmp6` values pfctl's parser sets. `ListRules` reads
+  it back (struct and nvlist paths). `ValidateRule` rejects a policy other
+  than drop on pass and match rules, and return-rst on non-TCP rules. Custom
+  return-icmp codes and a return-rst TTL are not settable, and read back as
+  the bare policy.
+- `Rule.Rtable` (`*int`): the `rtable N` option; nil means no option. A value
+  above 0 must be below the kernel's `net.fibs`.
+- `Address.Interface` and `Address.IfaceFlags` (`IfaceNetwork`,
+  `IfaceBroadcast`, `IfacePeer`, `IfaceNoAlias`): dynamic interface addresses
+  such as `(self)` and `(vtnet0:network)`. `ListRules` reads them back.
+- `Rule.TCPFlags` (`TCPFlags{Check, Mask}`, `FlagsSA()`, `TCPFlag*`): `flags
+  S/SA`; TCP only, Check must be within Mask.
+- `Rule.ICMPType` and `Rule.ICMPCode`, and `ProtocolICMPv6`.
+- `Rule.AnchorCall` (read-only) and `Client.MainRulesetHasAnchor(path)`, to
+  check that the main ruleset hooks an anchor such as `microvm-runner/*`.
+
+### Changed
+
+- **Behaviour change:** a rule without `Rtable` is now added with rtableid -1
+  (unset), as pfctl does, instead of 0; `ListRules` returns `Rtable == nil`
+  for it. Set `Rtable` to a pointer to 0 for the old effect.
+- **Behaviour change:** when `Rule.AF` is unset, the address family is now
+  inferred from the source and destination addresses, as pfctl does. Rules
+  whose `AF` contradicts an address, or that mix IPv4 and IPv6 addresses, are
+  rejected with `ErrInvalidRule`; before, the kernel got af 0 or a mismatch.
+  Consequences: a rule with an IPv4 address and `AF` unset now loads as
+  `inet` (and an IPv4-mapped IPv6 address counts as IPv4); IPv4 plus IPv6
+  addresses in one rule is an error; `ProtocolICMP` implies `inet` and
+  `ProtocolICMPv6` `inet6`, and the other family is rejected; `ListRules`
+  reports the resulting `AF`.
+- `KeepState` does not imply pfctl's default `flags S/SA` for TCP rules. A TCP
+  pass rule that should start states only on a SYN needs
+  `TCPFlags: FlagsSA()`; the library does not default it.
+- `TCPFlags` and `ICMPType`/`ICMPCode` on the wrong protocol are rejected
+  (pfctl silently drops them). Dynamic interface addresses have no `/N`
+  prefix. `Client.MainRulesetHasAnchor` ignores one leading `/`
+  (`anchor "/x/*"` equals `anchor "x/*"`); `x` and `x/*` are different calls.
+- `ListRules` no longer shows a dynamic interface address as `Any`.
+
+### Fixed
+
+- Rules were always added with `rtableid` 0, so `pfctl -sr` showed
+  `rtable 0` on every rule (see Changed).
+
 ## [0.2.0] - 2026-11-10
 
 ### Added
