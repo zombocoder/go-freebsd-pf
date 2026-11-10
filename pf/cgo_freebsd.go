@@ -371,6 +371,20 @@ static int pf_get_rule(int fd, struct pfioc_rule *pr) {
 }
 #endif
 
+// pf_begin_addrs starts an (empty) pool address buffer and returns its
+// ticket, which DIOCADDRULE wants in pool_ticket. The kernel compares it
+// with its current pool-buffer ticket, so a hard-coded 0 only works until
+// something else (pfctl -f) has used DIOCBEGINADDRS.
+static int pf_begin_addrs(int fd, u_int32_t *ticket) {
+	struct pfioc_pooladdr pp;
+	int rv;
+
+	memset(&pp, 0, sizeof(pp));
+	rv = ioctl(fd, DIOCBEGINADDRS, &pp);
+	*ticket = pp.ticket;
+	return rv;
+}
+
 static int pf_add_rule(int fd, struct pfioc_rule *pr) {
 	return ioctl(fd, DIOCADDRULE, pr);
 }
@@ -628,6 +642,12 @@ func ioctlGetRules(fd int, pr *C.struct_pfioc_rule) error {
 func ioctlGetRule(fd int, pr *C.struct_pfioc_rule) error {
 	rv, err := C.pf_get_rule(C.int(fd), pr)
 	return ioctlErr(opGetRule, rv, err)
+}
+
+func ioctlBeginAddrs(fd int) (C.u_int32_t, error) {
+	var ticket C.u_int32_t
+	rv, err := C.pf_begin_addrs(C.int(fd), &ticket)
+	return ticket, ioctlErr("DIOCBEGINADDRS", rv, err)
 }
 
 func ioctlAddRule(fd int, pr *C.struct_pfioc_rule) error {

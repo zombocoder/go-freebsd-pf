@@ -128,7 +128,11 @@ func (tx *Transaction) AddRule(rule Rule) error {
 	pr := ruleToC(rule, tx.anchor)
 	elem := C.trans_elem(tx.ctrans, 0)
 	pr.ticket = elem.ticket
-	pr.pool_ticket = 0
+	poolTicket, err := ioctlBeginAddrs(tx.client.fd)
+	if err != nil {
+		return err
+	}
+	pr.pool_ticket = poolTicket
 
 	return ioctlAddRule(tx.client.fd, &pr)
 }
