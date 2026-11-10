@@ -5,10 +5,14 @@ package pf
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"os/exec"
+	"os/signal"
 	"strings"
+	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -25,6 +29,14 @@ import (
 // PF is disabled again and the main ruleset flushed, which restores the
 // "disabled, no ruleset" starting point. Traffic is sent out of a tap
 // interface the test creates and destroys.
+//
+// TestMain adds a safety net for runs that end early: after all tests,
+// and on SIGINT/SIGTERM, it destroys leftover test taps, flushes the test
+// anchors, and disables PF and flushes the main ruleset if a test enabled
+// it. A panic or a "go test -timeout" expiry kills the process before
+// TestMain can run, so either can leave PF enabled with the pass-all
+// ruleset on the host: check with "pfctl -s info" and restore with
+// "pfctl -d; pfctl -F rules". Run these tests in a VM.
 
 const (
 	statesAnchor = testAnchor + "/states"
@@ -33,6 +45,50 @@ const (
 	tapLocalCIDR = "198.18.254.1/30"
 	tapPeer      = "198.18.254.2"
 )
+
+// Resources the safety net in TestMain cleans up if a test could not.
+var (
+	safetyMu      sync.Mutex
+	pfEnabledByUs bool
+	openTaps      = map[string]bool{}
+)
+
+func TestMain(m *testing.M) {
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		s := <-sig
+		fmt.Fprintf(os.Stderr, "go-freebsd-pf tests: %v, restoring PF test state\n", s)
+		safetyNet()
+		os.Exit(2)
+	}()
+	code := m.Run()
+	safetyNet()
+	os.Exit(code)
+}
+
+// safetyNet undoes what the tests may have left behind. Every step is a
+// no-op when the tests cleaned up after themselves.
+func safetyNet() {
+	if os.Getuid() != 0 {
+		return
+	}
+	safetyMu.Lock()
+	defer safetyMu.Unlock()
+	for name := range openTaps {
+		_ = exec.Command("pfctl", "-i", name, "-F", "states").Run()
+		_ = exec.Command("ifconfig", name, "destroy").Run()
+		delete(openTaps, name)
+	}
+	for _, a := range []string{rulesAnchor, statesAnchor, testAnchor} {
+		_ = exec.Command("pfctl", "-a", a, "-F", "rules").Run()
+	}
+	if pfEnabledByUs {
+		_ = exec.Command("pfctl", "-d").Run()
+		_ = exec.Command("pfctl", "-F", "rules").Run()
+		pfEnabledByUs = false
+	}
+}
 
 func runCmd(t *testing.T, stdin string, name string, args ...string) string {
 	t.Helper()
@@ -67,11 +123,17 @@ func enableSafePF(t *testing.T, c *Client) {
 		}
 	}
 
+	safetyMu.Lock()
+	pfEnabledByUs = true
+	safetyMu.Unlock()
 	runCmd(t, safeRuleset, "pfctl", "-f", "-")
 	t.Cleanup(func() {
 		// Order matters: stop filtering first, then drop the ruleset.
 		_ = exec.Command("pfctl", "-d").Run()
 		_ = exec.Command("pfctl", "-F", "rules").Run()
+		safetyMu.Lock()
+		pfEnabledByUs = false
+		safetyMu.Unlock()
 	})
 	if err := c.Enable(); err != nil {
 		t.Fatalf("Enable: %v", err)
@@ -82,7 +144,15 @@ func enableSafePF(t *testing.T, c *Client) {
 func createTap(t *testing.T) string {
 	t.Helper()
 	name := strings.TrimSpace(runCmd(t, "", "ifconfig", "tap", "create"))
-	t.Cleanup(func() { _ = exec.Command("ifconfig", name, "destroy").Run() })
+	safetyMu.Lock()
+	openTaps[name] = true
+	safetyMu.Unlock()
+	t.Cleanup(func() {
+		_ = exec.Command("ifconfig", name, "destroy").Run()
+		safetyMu.Lock()
+		delete(openTaps, name)
+		safetyMu.Unlock()
+	})
 	// Holding the character device open brings the link up; with "no
 	// carrier" the stack drops output before PF ever sees it.
 	dev, err := os.OpenFile("/dev/"+name, os.O_RDWR, 0)
@@ -263,8 +333,8 @@ func TestListRulesInAnchor(t *testing.T) {
 func TestKillStatesByInterface(t *testing.T) {
 	c := openClient(t)
 	defer c.Close()
-	ifname := createTap(t)
 	enableSafePF(t, c)
+	ifname := createTap(t)
 
 	_ = c.ClearRules(statesAnchor, RuleSetFilter)
 	defer func() { _ = c.ClearRules(statesAnchor, RuleSetFilter) }()
@@ -302,8 +372,8 @@ func TestKillStatesByInterface(t *testing.T) {
 func TestClearStatesByInterface(t *testing.T) {
 	c := openClient(t)
 	defer c.Close()
-	ifname := createTap(t)
 	enableSafePF(t, c)
+	ifname := createTap(t)
 
 	_ = c.ClearRules(statesAnchor, RuleSetFilter)
 	defer func() { _ = c.ClearRules(statesAnchor, RuleSetFilter) }()
@@ -332,8 +402,8 @@ func TestClearStatesByInterface(t *testing.T) {
 func TestListStatesOnInterface(t *testing.T) {
 	c := openClient(t)
 	defer c.Close()
-	ifname := createTap(t)
 	enableSafePF(t, c)
+	ifname := createTap(t)
 
 	_ = c.ClearRules(statesAnchor, RuleSetFilter)
 	defer func() { _ = c.ClearRules(statesAnchor, RuleSetFilter) }()

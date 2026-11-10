@@ -93,6 +93,16 @@ tests therefore follow these rules, and new tests must too:
   own tap; never call `KillStates`/`ClearStates` with an empty filter.
 - **Clean up on failure.** Use `t.Cleanup`/`defer` for anchors, tables, taps
   and states so a failing test leaves nothing behind.
+- **Order:** call `enableSafePF` before `createTap`, so a skipped test
+  creates nothing and cleanup tears the tap down before PF is disabled.
+- **Safety net.** `TestMain` (in `pf/integration_states_test.go`) destroys
+  leftover test taps, flushes the test anchors and, if a test enabled PF,
+  disables it and flushes the main ruleset, after the run and on
+  SIGINT/SIGTERM (Ctrl-C). A panic or a `go test -timeout` expiry kills the
+  process before that can run and **can leave PF enabled** with the
+  pass-all ruleset. Check with `pfctl -s info` and restore with
+  `pfctl -d; pfctl -F rules`. This is one more reason to run the
+  PF-enabling tests in a VM only.
 
 ## Writing Tests
 
