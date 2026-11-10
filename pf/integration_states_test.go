@@ -357,6 +357,20 @@ func TestListStatesOnInterface(t *testing.T) {
 	if s.OrigInterface != ifname || s.Expire <= 0 || s.Expire > time.Hour {
 		t.Errorf("unexpected interface/expiry: %+v", s)
 	}
+
+	// Same semantics as the kernel's kill: "all" selects no floating state.
+	all, err := c.ListStates(StateFilter{Interface: "all"})
+	if err != nil {
+		t.Fatalf("ListStates(all): %v", err)
+	}
+	for _, st := range all {
+		if st.OrigInterface == ifname {
+			t.Errorf("ListStates(all) returned a floating state of %s: %+v", ifname, st)
+		}
+	}
+	if n, err := c.KillStates(StateFilter{Interface: "all"}); err != nil || n != 0 {
+		t.Errorf("KillStates(all) = %d, %v; want 0 (kernel matches the original interface)", n, err)
+	}
 	t.Logf("state: %+v", s)
 	_, _ = c.KillStates(StateFilter{Interface: ifname})
 }

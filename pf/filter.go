@@ -8,11 +8,13 @@ import (
 // matchesFilter checks if a state matches the given filter criteria.
 //
 // The interface criterion follows the kernel's DIOCKILLSTATES/DIOCCLRSTATES
-// rule: a floating state (state-policy floating, the default) is attached
-// to the pseudo-interface "all", so it is matched by the interface it was
-// created on (OrigInterface) as well.
+// (pf_killstates_row, pf_clear_states): a floating state (state-policy
+// floating, the default) is attached to the pseudo-interface "all" and is
+// matched by the interface it was created on (OrigInterface) only; an
+// if-bound state is matched by the interface it is bound to. So ListStates
+// lists exactly the states KillStates with the same filter would remove.
 func matchesFilter(s State, f StateFilter) bool {
-	if f.Interface != "" && s.Interface != f.Interface && s.OrigInterface != f.Interface {
+	if f.Interface != "" && stateKillInterface(s) != f.Interface {
 		return false
 	}
 	if f.Source != nil && !f.Source.Contains(s.Source) {
@@ -22,6 +24,15 @@ func matchesFilter(s State, f StateFilter) bool {
 		return false
 	}
 	return true
+}
+
+// stateKillInterface is the interface name the kernel compares when
+// killing or clearing states by interface.
+func stateKillInterface(s State) string {
+	if s.Interface == "all" {
+		return s.OrigInterface
+	}
+	return s.Interface
 }
 
 // orientWireKey turns the wire-side state key into initiator/responder

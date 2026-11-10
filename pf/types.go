@@ -307,6 +307,10 @@ type State struct {
 
 // StateFilter specifies criteria for filtering states.
 type StateFilter struct {
+	// Interface selects states as the kernel does for kill/clear: a
+	// floating state by the interface it was created on (OrigInterface),
+	// an if-bound state by the interface it is bound to. "all" therefore
+	// matches no floating state; use an empty Interface for every state.
 	Interface   string
 	Source      *net.IPNet
 	Destination *net.IPNet

@@ -21,10 +21,13 @@ func TestMatchesFilterInterface(t *testing.T) {
 	}{
 		{"empty filter", floating, StateFilter{}, true},
 		{"floating by creating interface", floating, StateFilter{Interface: "tap3"}, true},
-		{"floating by all", floating, StateFilter{Interface: "all"}, true},
+		// The kernel's kill/clear compare a floating state's original
+		// interface only, so "all" matches nothing there; listing agrees.
+		{"floating not by all", floating, StateFilter{Interface: "all"}, false},
 		{"floating other interface", floating, StateFilter{Interface: "tap4"}, false},
 		{"if-bound", bound, StateFilter{Interface: "tap3"}, true},
 		{"if-bound other interface", bound, StateFilter{Interface: "re0"}, false},
+		{"if-bound ignores orig", State{Interface: "tap3", OrigInterface: "tap9"}, StateFilter{Interface: "tap9"}, false},
 		{"source match", floating, StateFilter{Interface: "tap3", Source: mustCIDR(t, "198.18.254.0/30")}, true},
 		{"source mismatch", floating, StateFilter{Source: mustCIDR(t, "192.0.2.0/24")}, false},
 		{"destination match", floating, StateFilter{Destination: mustCIDR(t, "198.18.254.2/32")}, true},
