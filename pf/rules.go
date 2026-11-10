@@ -76,8 +76,12 @@ func (c *Client) ListRules(query RuleQuery) ([]Rule, error) {
 	return rules, nil
 }
 
-// AddRule adds a single rule to PF. For transactional rule loading,
-// use Begin/Transaction instead.
+// AddRule adds a single rule to PF outside a transaction.
+//
+// Deprecated: the kernel only accepts DIOCADDRULE with the ticket of an
+// open transaction, so this call fails (EINVAL on FreeBSD 15.1). Use
+// Client.Begin with Transaction.AddRule and Transaction.Commit, or
+// Client.ReplaceRules, instead.
 func (c *Client) AddRule(rule Rule) error {
 	if err := ValidateRule(rule); err != nil {
 		return err

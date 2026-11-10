@@ -23,6 +23,8 @@ func (c *Client) Status() (*Status, error) { return nil, ErrUnsupportedPlatform 
 func (c *Client) ClearStatus() error       { return ErrUnsupportedPlatform }
 
 func (c *Client) ListRules(_ RuleQuery) ([]Rule, error) { return nil, ErrUnsupportedPlatform }
+
+// Deprecated: see the FreeBSD implementation; use Begin/Transaction.AddRule.
 func (c *Client) AddRule(_ Rule) error                  { return ErrUnsupportedPlatform }
 func (c *Client) ReplaceRules(_ string, _ []Rule) error { return ErrUnsupportedPlatform }
 func (c *Client) ClearRules(_ string, _ RuleSet) error  { return ErrUnsupportedPlatform }
