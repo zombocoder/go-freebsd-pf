@@ -115,3 +115,36 @@ func TestMapErrno(t *testing.T) {
 		}
 	})
 }
+
+func TestCompatUnsupported(t *testing.T) {
+	t.Run("ENODEV becomes ErrNotSupported", func(t *testing.T) {
+		err := compatUnsupported(mapErrno("DIOCGETSTATESV2", syscall.ENODEV))
+		if !errors.Is(err, ErrNotSupported) {
+			t.Fatalf("expected ErrNotSupported, got %v", err)
+		}
+		var opErr *OpError
+		if !errors.As(err, &opErr) {
+			t.Fatalf("expected *OpError, got %T", err)
+		}
+		if opErr.Op != "DIOCGETSTATESV2" || opErr.Errno != syscall.ENODEV {
+			t.Fatalf("op/errno not preserved: %+v", opErr)
+		}
+	})
+
+	t.Run("ENOTTY becomes ErrNotSupported", func(t *testing.T) {
+		err := compatUnsupported(mapErrno("DIOCSTART", syscall.ENOTTY))
+		if !errors.Is(err, ErrNotSupported) {
+			t.Fatalf("expected ErrNotSupported, got %v", err)
+		}
+	})
+
+	t.Run("other errors pass through", func(t *testing.T) {
+		in := mapErrno("DIOCSTART", syscall.EEXIST)
+		if got := compatUnsupported(in); got != in {
+			t.Fatalf("expected error unchanged, got %v", got)
+		}
+		if got := compatUnsupported(nil); got != nil {
+			t.Fatalf("expected nil, got %v", got)
+		}
+	})
+}
