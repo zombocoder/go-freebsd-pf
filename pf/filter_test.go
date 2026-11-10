@@ -82,3 +82,38 @@ func TestNetworkOrder(t *testing.T) {
 		t.Errorf("be64toh = %#x", got)
 	}
 }
+
+func TestStatesBufLen(t *testing.T) {
+	const e = 384 // sizeof(struct pf_state_export)
+	if got, want := statesBufLen(0, e), 16*e; got != want {
+		t.Errorf("statesBufLen(0) = %d, want %d", got, want)
+	}
+	// probe of 100 states -> 125 + 16 entries
+	if got, want := statesBufLen(100*e, e), 141*e; got != want {
+		t.Errorf("statesBufLen(100 entries) = %d, want %d", got, want)
+	}
+	// Never smaller than the previous buffer when growing.
+	if got := statesBufLen(1000*e, e); got < 1000*e {
+		t.Errorf("statesBufLen shrank: %d", got)
+	}
+}
+
+func TestStatesMaybeTruncated(t *testing.T) {
+	const e = 384
+	buf := 141 * e
+	cases := []struct {
+		returned int
+		want     bool
+	}{
+		{0, false},
+		{100 * e, false},    // plenty of room left
+		{buf - 16*e, false}, // exactly the slack: still complete
+		{buf - 15*e, true},  // less than the slack left: a row may not have fit
+		{buf, true},         // full
+	}
+	for _, tc := range cases {
+		if got := statesMaybeTruncated(tc.returned, buf, e); got != tc.want {
+			t.Errorf("statesMaybeTruncated(%d of %d) = %v, want %v", tc.returned, buf, got, tc.want)
+		}
+	}
+}

@@ -60,3 +60,24 @@ func be64toh(v uint64) uint64 {
 	binary.NativeEndian.PutUint64(b[:], v)
 	return binary.BigEndian.Uint64(b[:])
 }
+
+// statesSlack is the head-room, in entries, ListStates leaves in its
+// DIOCGETSTATESV2 buffer. The kernel copies whole hash rows and stops
+// (without an error) at the first row that does not fit, so a reply that
+// leaves less than this much room may have been cut short.
+const statesSlack = 16
+
+// statesBufLen returns the buffer size for DIOCGETSTATESV2 given the
+// kernel's size probe (bytes): 25% more entries than probed plus slack,
+// since states keep being created between the probe and the copy.
+func statesBufLen(probe, entry int) int {
+	n := probe / entry
+	return (n*5/4 + statesSlack) * entry
+}
+
+// statesMaybeTruncated reports whether a DIOCGETSTATESV2 reply of returned
+// bytes into a bufLen buffer may be missing states and must be retried
+// with a larger buffer.
+func statesMaybeTruncated(returned, bufLen, entry int) bool {
+	return bufLen-returned < statesSlack*entry
+}

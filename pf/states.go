@@ -19,6 +19,7 @@ static void set_states_v2_buf(struct pfioc_states_v2 *ps, void *buf) {
 */
 import "C"
 import (
+	"fmt"
 	"unsafe"
 )
 
@@ -38,33 +39,46 @@ func (c *Client) ListStates(filter StateFilter) ([]State, error) {
 	C.memset(unsafe.Pointer(&ps), 0, C.sizeof_struct_pfioc_states_v2)
 	ps.ps_req_version = C.PF_STATE_VERSION
 
-	// First call: get required buffer size
+	entry := int(C.sizeof_struct_pf_state_export)
+
+	// Probe: with ps_len 0 the kernel reports the size of the state zone.
 	ps.ps_len = 0
 	C.set_states_v2_buf(&ps, nil)
 	if err := ioctlGetStatesV2(c.fd, &ps); err != nil {
 		return nil, err
 	}
 
-	if ps.ps_len == 0 {
-		return nil, nil
-	}
-
-	buf := C.malloc(C.size_t(ps.ps_len))
-	if buf == nil {
-		return nil, &OpError{Op: "ListStates", Err: ErrInvalidArgument}
-	}
-	defer C.free(buf)
-
-	C.set_states_v2_buf(&ps, buf)
-	if err := ioctlGetStatesV2(c.fd, &ps); err != nil {
-		return nil, err
+	// The kernel fills the buffer row by row and stops quietly at the
+	// first hash row that does not fit, so over-allocate and retry with a
+	// larger buffer while the reply leaves too little head-room.
+	bufLen := statesBufLen(int(ps.ps_len), entry)
+	var buf unsafe.Pointer
+	defer func() { C.free(buf) }()
+	for attempt := 0; ; attempt++ {
+		C.free(buf)
+		buf = C.malloc(C.size_t(bufLen))
+		if buf == nil {
+			return nil, &OpError{Op: "ListStates", Err: ErrInvalidArgument}
+		}
+		ps.ps_len = C.int(bufLen)
+		C.set_states_v2_buf(&ps, buf)
+		if err := ioctlGetStatesV2(c.fd, &ps); err != nil {
+			return nil, err
+		}
+		if !statesMaybeTruncated(int(ps.ps_len), bufLen, entry) {
+			break
+		}
+		if attempt == 8 {
+			return nil, &OpError{Op: "ListStates", Err: fmt.Errorf("state table keeps growing beyond %d bytes", bufLen)}
+		}
+		bufLen = max(bufLen*2, statesBufLen(int(ps.ps_len), entry))
 	}
 
 	count := int(ps.ps_len) / int(C.sizeof_struct_pf_state_export)
 	states := make([]State, 0, count)
 
 	for i := 0; i < count; i++ {
-		cs := (*C.struct_pf_state_export)(unsafe.Add(buf, i*int(C.sizeof_struct_pf_state_export)))
+		cs := (*C.struct_pf_state_export)(unsafe.Add(buf, i*entry))
 		s := stateFromC(cs)
 		if matchesFilter(s, filter) {
 			states = append(states, s)

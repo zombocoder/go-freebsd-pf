@@ -374,3 +374,32 @@ func TestListStatesOnInterface(t *testing.T) {
 	t.Logf("state: %+v", s)
 	_, _ = c.KillStates(StateFilter{Interface: ifname})
 }
+
+func TestListStatesMany(t *testing.T) {
+	c := openClient(t)
+	defer c.Close()
+	enableSafePF(t, c)
+	ifname := createTap(t)
+
+	_ = c.ClearRules(statesAnchor, RuleSetFilter)
+	defer func() { _ = c.ClearRules(statesAnchor, RuleSetFilter) }()
+	if err := c.ReplaceRules(statesAnchor, []Rule{passOutRule(ifname)}); err != nil {
+		t.Fatalf("ReplaceRules: %v", err)
+	}
+
+	const n = 300
+	for port := 41000; port < 41000+n; port++ {
+		sendUDP(t, port)
+	}
+	states, err := c.ListStates(StateFilter{Interface: ifname})
+	if err != nil {
+		t.Fatalf("ListStates: %v", err)
+	}
+	if len(states) != n {
+		t.Fatalf("ListStates returned %d states on %s, want %d", len(states), ifname, n)
+	}
+	killed, err := c.KillStates(StateFilter{Interface: ifname})
+	if err != nil || killed != n {
+		t.Fatalf("KillStates = %d, %v; want %d", killed, err, n)
+	}
+}
