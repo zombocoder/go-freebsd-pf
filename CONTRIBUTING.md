@@ -22,7 +22,7 @@ Security problems should be reported privately, see [SECURITY.md](SECURITY.md).
 
 ### Prerequisites
 
-- FreeBSD 13.2 or later (13.x, 14.x, 15.x), amd64 or arm64
+- FreeBSD 14.x or 15.x, amd64 or arm64 (13.x is end of life and untested)
 - Go 1.22+ (`pkg install go`)
 - The base system C compiler (cgo); `<net/pfvar.h>` and libnv come with base
 - `pf.ko` loaded (`kldload pf`) for integration tests
@@ -128,8 +128,11 @@ tests therefore follow these rules, and new tests must too:
   Go, loads `pf.ko`, runs `go vet` (with and without the `integration` tag),
   builds the package and examples, and runs the unit and integration tests
   as root with `GOPF_TEST_ENABLE_PF=1`. The VM is thrown away afterwards, so
-  enabling PF there is safe. Together the two releases cover both ioctl
-  paths (struct ioctls on 14.x, nvlist ioctls on 15.x).
+  enabling PF there is safe. On 14.5 the integration suite runs a second
+  time with `CGO_CFLAGS=-DGOPF_FORCE_NV`, so both ioctl paths are tested
+  on the same kernel; 15.1 covers the nvlist path natively.
+- Not covered: 13.x, 14.0–14.4, 15.0, and 15.x kernels without
+  `COMPAT_FREEBSD14` (the CI images run GENERIC).
 
 ## Code Style
 
@@ -230,6 +233,6 @@ examples/            Example programs
 - **NAT/RDR** rules with address pools, and more rule options (tags,
   `max-states`, timeouts, `route-to`)
 - **Source nodes**, limits and timeouts
-- **Testing on 13.x** (not covered by CI)
+- **Testing on 13.x and on 15.x kernels without `COMPAT_FREEBSD14`** (not covered by CI)
 
 Questions and design discussions are welcome in GitHub issues.

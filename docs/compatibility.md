@@ -2,15 +2,20 @@
 
 ## Supported Versions
 
-| FreeBSD Version | Status    | Notes                                                        |
-|-----------------|-----------|--------------------------------------------------------------|
-| 13.2 – 13.5     | Supported | struct ioctls throughout                                     |
-| 14.0 – 14.3     | Supported | struct ioctls throughout                                     |
-| 15.0 – 15.1     | Supported | nvlist ioctls for status, rule read-back and state clear/kill; Enable/Disable and ListStates need a kernel with `COMPAT_FREEBSD14` (GENERIC has it) |
+| FreeBSD Version | Status | Notes |
+|-----------------|--------|-------|
+| 15.1            | Tested in CI and on hardware | nvlist ioctls for status, rule read-back and state clear/kill; Enable/Disable and ListStates need a kernel with `COMPAT_FREEBSD14` (GENERIC has it) |
+| 15.0            | Expected to work, not tested | same headers and ioctls as 15.1 |
+| 14.5            | Tested in CI | struct ioctls; CI also runs the suite with the nvlist path forced (`-DGOPF_FORCE_NV`) |
+| 14.0 – 14.4     | Expected to work, not tested in CI | same ioctls as 14.5 |
+| 13.x            | Untested, end of life | the headers (13.2–13.5) declare every ioctl used; no test host or CI job |
 
-Tested on hardware: FreeBSD 15.1-RELEASE (GENERIC, amd64), unit and
-integration tests. On 13.x/14.x the package selects the same ioctls
-v0.1.0 used.
+What is actually exercised: CI runs the unit and integration tests as root
+in FreeBSD 14.5 and 15.1 VMs (GENERIC kernels); on 14.5 a second run forces
+the nvlist path. The port was also tested on 15.1-RELEASE (GENERIC, amd64).
+A 15.x kernel built without `COMPAT_FREEBSD14` cannot be tested in CI (the
+VM images run GENERIC); the `ErrNotSupported` behaviour for that case comes
+from the kernel source and is not exercised by any test.
 
 ## How the ioctl is chosen
 
@@ -74,7 +79,9 @@ pseudo-interface `all`; the interface it was created on is
 `State.OrigInterface`. `KillStates`/`ClearStates` with
 `StateFilter{Interface: "tap0"}` remove states created on `tap0` in both
 cases (the kernel matches the original interface), and `ListStates` with
-the same filter matches `Interface` or `OrigInterface` the same way.
+the same filter selects exactly what KillStates would remove: floating
+states by `OrigInterface`, if-bound states by `Interface` (so `"all"`
+matches no floating state).
 
 ## Struct Layout Differences
 

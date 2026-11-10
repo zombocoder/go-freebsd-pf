@@ -5,7 +5,10 @@ each FreeBSD release. All operations live in package `pf` and go through
 `/dev/pf` ioctls (cgo); nothing shells out to `pfctl`.
 
 Legend: ✅ works, ⚠️ works with a condition (see note), ❌ not available.
-"15.x" was tested on 15.1-RELEASE (GENERIC, amd64); CI also runs 14.5.
+CI runs the tests on 14.5 (both ioctl paths) and 15.1, GENERIC kernels;
+other 14.x/15.x releases are expected to behave the same but are not
+tested, and 13.x (end of life) is untested. The "needs COMPAT_FREEBSD14"
+case below cannot be tested in CI.
 
 ## Client
 
@@ -36,7 +39,7 @@ state-table search/insert/removal counters and the ruleset checksum.
 | `ReplaceRules(anchor, rules)`     | ✅ (transaction)              | ✅ (transaction)                |
 | `ClearRules(anchor, ruleset)`     | ✅ (empty transaction)        | ✅ (empty transaction)          |
 | `ListAnchors(path)`               | ✅ `DIOCGETRULESETS`/`DIOCGETRULESET` | ✅ same                 |
-| `Client.AddRule(rule)`            | ❌ see note                   | ❌ see note                     |
+| `Client.AddRule(rule)` (deprecated) | ❌ see note                 | ❌ see note                     |
 | `ValidateRule`, `ValidateTableName` | ✅ (pure Go)               | ✅ (pure Go)                    |
 
 Rule fields: action (pass/block/match), direction, interface, protocol,
@@ -69,6 +72,12 @@ kill/clear) rule label. The interface criterion matches the interface a state
 was created on, also for floating states (bound to `all`), so
 `KillStates(StateFilter{Interface: "tap0"})` removes everything created on
 `tap0` — the operation a VM manager needs when it destroys a guest's tap.
+`StateFilter.Interface` follows the kernel's kill semantics in
+`ListStates` too, so `"all"` matches no floating state. `ListStates` reads
+the table in passes and only returns a listing it could confirm (room to
+spare and the same size twice); otherwise it returns `ErrStatesIncomplete`
+rather than a short list (buffer limit 256 MiB, about 700k states).
+Over-long interface names or labels are rejected, never truncated.
 `State` carries id, creator id, `Interface` / `OrigInterface`, protocol,
 direction, address family, source/destination address and port (initiator
 first), packet and byte counters, age and time to expiry.
@@ -87,6 +96,7 @@ base's pfctl uses on 15, is not implemented.
 `errors.Is`: `ErrPermissionDenied`, `ErrDeviceNotFound`, `ErrAlreadyEnabled`,
 `ErrAlreadyDisabled`, `ErrInvalidArgument`, `ErrInvalidRule`,
 `ErrTransactionClosed`, `ErrTableNotFound`, `ErrNotSupported`,
+`ErrStatesIncomplete`,
 `ErrUnsupportedPlatform` (every call on non-FreeBSD or without cgo).
 
 ## Not implemented

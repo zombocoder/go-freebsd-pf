@@ -6,7 +6,7 @@
 [![Release](https://img.shields.io/github/v/release/zombocoder/go-freebsd-pf?sort=semver)](https://github.com/zombocoder/go-freebsd-pf/releases)
 [![License](https://img.shields.io/badge/license-BSD--2--Clause-green.svg)](LICENSE)
 [![Go Version](https://img.shields.io/badge/Go-%3E%3D1.22-00ADD8.svg)](https://golang.org/)
-[![FreeBSD](https://img.shields.io/badge/FreeBSD-13%20%7C%2014%20%7C%2015-red.svg)](https://www.freebsd.org/)
+[![FreeBSD](https://img.shields.io/badge/FreeBSD-14%20%7C%2015-red.svg)](https://www.freebsd.org/)
 
 A Go library for managing the FreeBSD PF (Packet Filter) firewall via /dev/pf ioctls.
 
@@ -21,7 +21,7 @@ each operation supports per release, the [changelog](CHANGELOG.md) and
 
 ## Requirements
 
-- FreeBSD 13.2 or later (13.x, 14.x, 15.x)
+- FreeBSD 14.x or 15.x (13.x untested)
 - Go 1.22 or later
 - cgo enabled (CGO_ENABLED=1)
 - Root privileges (or appropriate /dev/pf permissions)
@@ -78,9 +78,11 @@ func main() {
 
 | Version     | Support Level |
 |-------------|---------------|
-| 13.2 – 13.5 | Supported |
-| 14.0 – 14.3 | Supported |
-| 15.0 – 15.1 | Supported. Status, rule read-back and state clear/kill use the nvlist ioctls (`DIOC*NV`); Enable/Disable and ListStates need a kernel with `COMPAT_FREEBSD14` (GENERIC has it), otherwise they return `pf.ErrNotSupported` |
+| 15.1        | Tested in CI. Status, rule read-back and state clear/kill use the nvlist ioctls (`DIOC*NV`); Enable/Disable and ListStates need a kernel with `COMPAT_FREEBSD14` (GENERIC has it), otherwise they return `pf.ErrNotSupported` |
+| 15.0        | Expected to work, not tested |
+| 14.5        | Tested in CI (struct ioctls, and the nvlist path forced) |
+| 14.0 – 14.4 | Expected to work, not tested in CI |
+| 13.x        | Untested, end of life |
 
 The ioctl used for each operation is picked at compile time from what
 `<net/pfvar.h>` defines, so build on the release you run on.
