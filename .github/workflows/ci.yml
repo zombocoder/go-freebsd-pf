@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+
+      - name: Check formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::These files are not gofmt-formatted (run 'gofmt -w .'):"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Check go.mod is tidy
+        run: go mod tidy -diff
+
+  freebsd:
+    # The library is FreeBSD-only and uses cgo against the base system
+    # headers (<net/pfvar.h> differs between 14.x and 15.x), so it is built
+    # and tested inside a FreeBSD VM running under QEMU on the Linux runner.
+    # The integration tests (build tag "integration") run as root with
+    # GOPF_TEST_ENABLE_PF=1: with pf.ko freshly loaded (disabled, no
+    # ruleset) they enable PF with a pass-all ruleset that calls the
+    # go-freebsd-pf-test/* anchors, create and destroy their own tap
+    # interfaces, and restore "disabled, no ruleset". The VM is discarded
+    # afterwards.
+    name: FreeBSD ${{ matrix.release }}
+    runs-on: ubuntu-latest
+    # A normal run takes a few minutes; occasionally the VM hangs while
+    # booting under nested virtualization. Fail fast so the job can be re-run.
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        release: ["14.5", "15.1"]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build and test in FreeBSD VM
+        uses: vmactions/freebsd-vm@v1.5.9
+        with:
+          release: ${{ matrix.release }}
+          copyback: false
+          cache-after-prepare: true
+          prepare: |
+            ASSUME_ALWAYS_YES=yes pkg install -y go
+          run: |
+            set -e
+            export GOFLAGS=-buildvcs=false
+            freebsd-version -ku
+            go version
+            kldstat -q -m pf || kldload pf
+            go vet ./...
+            go vet -tags integration ./...
+            go build ./...
+            go build ./examples/...
+            go test -count=1 -v ./...
+            GOPF_TEST_ENABLE_PF=1 go test -tags integration -count=1 -p 1 -v ./...
