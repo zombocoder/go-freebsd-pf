@@ -57,6 +57,9 @@ const (
 	ProtocolICMP Protocol = 1
 	ProtocolTCP  Protocol = 6
 	ProtocolUDP  Protocol = 17
+
+	// ProtocolICMPv6 is IPPROTO_ICMPV6.
+	ProtocolICMPv6 Protocol = 58
 )
 
 func (p Protocol) String() string {
@@ -69,6 +72,8 @@ func (p Protocol) String() string {
 		return "tcp"
 	case ProtocolUDP:
 		return "udp"
+	case ProtocolICMPv6:
+		return "ipv6-icmp" // getprotobynumber(58), as pfctl prints it
 	default:
 		return "unknown"
 	}
@@ -121,7 +126,49 @@ type Address struct {
 	Any     bool
 	Table   string // e.g. "blocked_hosts" (without angle brackets)
 	Negate  bool
+
+	// Interface makes this a dynamic interface address, pfctl's "(self)" or
+	// "(vtnet0)": the addresses currently on that interface or group,
+	// tracked by the kernel. It excludes Any, IP, Network and Table; a /N prefix on a dynamic
+	// address is not supported.
+	// IfaceFlags refines it ("(vtnet0:network)"). A dynamic address does not
+	// fix the rule's address family; set Rule.AF to restrict it.
+	Interface  string
+	IfaceFlags IfaceFlags
 }
+
+// IfaceFlags are the modifiers of a dynamic interface address, from
+// PFI_AFLAG_*. At most one of IfaceNetwork, IfaceBroadcast and IfacePeer.
+type IfaceFlags uint8
+
+const (
+	IfaceNetwork   IfaceFlags = 0x01 // (if:network)
+	IfaceBroadcast IfaceFlags = 0x02 // (if:broadcast)
+	IfacePeer      IfaceFlags = 0x04 // (if:peer)
+	IfaceNoAlias   IfaceFlags = 0x08 // (if:0): no alias addresses
+)
+
+// TCP header flag bits for TCPFlags.
+const (
+	TCPFlagFIN uint8 = 0x01
+	TCPFlagSYN uint8 = 0x02
+	TCPFlagRST uint8 = 0x04
+	TCPFlagPSH uint8 = 0x08
+	TCPFlagACK uint8 = 0x10
+	TCPFlagURG uint8 = 0x20
+	TCPFlagECE uint8 = 0x40
+	TCPFlagCWR uint8 = 0x80
+)
+
+// TCPFlags is pfctl's "flags Check/Mask": the packet matches when
+// (flags & Mask) == Check. The zero value matches any flags.
+type TCPFlags struct {
+	Check uint8
+	Mask  uint8
+}
+
+// FlagsSA returns "flags S/SA", the usual first-packet-of-a-connection test.
+func FlagsSA() TCPFlags { return TCPFlags{Check: TCPFlagSYN, Mask: TCPFlagSYN | TCPFlagACK} }
 
 // Rule represents a PF firewall rule.
 type Rule struct {
@@ -139,9 +186,45 @@ type Rule struct {
 
 	Quick     bool
 	Log       bool
-	KeepState bool
+	KeepState bool // keep state; does not add `flags S/SA` (see TCPFlags)
 	Label     string
 	Anchor    string
+
+	// TCPFlags is "flags Check/Mask"; only with ProtocolTCP. KeepState does
+	// not imply pfctl's default `flags S/SA`: a TCP pass rule without
+	// TCPFlags matches any flags, so set TCPFlags: FlagsSA() where pfctl
+	// would have defaulted it. Stricter than pfctl, which silently drops
+	// flags on non-TCP rules: they are rejected here.
+	TCPFlags TCPFlags
+
+	// ICMPType and ICMPCode match the ICMP/ICMPv6 type and code (pfctl's
+	// icmp-type N code M; the numeric values, not names). ICMPCode needs
+	// ICMPType; both need ProtocolICMP or ProtocolICMPv6 (stricter than
+	// pfctl, which ignores them elsewhere). nil matches any. ProtocolICMP
+	// implies inet and ProtocolICMPv6 inet6 when AF is unset; the other
+	// family is rejected.
+	ICMPType *uint8
+	ICMPCode *uint8
+
+	// AnchorCall is set by ListRules on a rule that evaluates an anchor
+	// (pfctl's `anchor "name"`), to the anchor path as the kernel reports it,
+	// including a trailing "/*" for a wildcard. Read-only: AddRule ignores it.
+	AnchorCall string
+
+	// BlockPolicy is the policy of a block rule (drop, return, return-rst,
+	// return-icmp). The zero value is BlockPolicyDrop; any other value is
+	// rejected for pass and match rules, and BlockPolicyReturnRST needs
+	// ProtocolTCP. The kernel keeps custom return-icmp codes and a return-rst
+	// TTL; this package writes pfctl's defaults and ListRules reads back only
+	// the bare policy, so those details are lost on a round trip.
+	BlockPolicy BlockPolicy
+
+	// Rtable is the routing table (FIB) the rule selects, as pfctl's
+	// `rtable N`. nil means the rule has no rtable option (rtableid -1 in
+	// the kernel); a pointer to 0 means `rtable 0` explicitly. ListRules
+	// reports nil for rules without rtable. A value above 0 must be below the
+	// kernel's net.fibs, or the kernel rejects the rule.
+	Rtable *int
 
 	Nr uint32 // rule number (read-only, set by kernel)
 

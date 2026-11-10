@@ -349,6 +349,8 @@ static int pf_get_rule(int fd, struct pfioc_rule *pr) {
 	pr->rule.rtableid = gopf_nv_num(r, "rtableid");
 	pr->rule.max_states = gopf_nv_num(r, "max_states");
 	pr->rule.rule_flag = gopf_nv_num(r, "rule_flag");
+	pr->rule.return_icmp = gopf_nv_num(r, "return_icmp");
+	pr->rule.return_icmp6 = gopf_nv_num(r, "return_icmp6");
 	pr->rule.action = gopf_nv_num(r, "action");
 	pr->rule.direction = gopf_nv_num(r, "direction");
 	pr->rule.log = gopf_nv_num(r, "log");
@@ -520,6 +522,16 @@ static void set_addr_wrap_addrmask(struct pf_addr_wrap *aw,
 		memcpy(&aw->v.a.mask, mask, addrlen);
 }
 
+// Set addr_wrap to dynamic interface type, as pfctl's dynaddr: the
+// interface name, the modifier flags and a full host mask.
+static void set_addr_wrap_dyn(struct pf_addr_wrap *aw, const char *ifname,
+	u_int8_t iflags) {
+	aw->type = PF_ADDR_DYNIFTL;
+	aw->iflags = iflags;
+	strlcpy(aw->v.ifname, ifname, IFNAMSIZ);
+	memset(&aw->v.a.mask, 0xff, sizeof(aw->v.a.mask));
+}
+
 // Set addr_wrap to TABLE type.
 static void set_addr_wrap_table(struct pf_addr_wrap *aw, const char *name) {
 	aw->type = PF_ADDR_TABLE;
@@ -536,6 +548,11 @@ static void get_addr_wrap_addr(const struct pf_addr_wrap *aw,
 static void get_addr_wrap_mask(const struct pf_addr_wrap *aw,
 	void *mask, int addrlen) {
 	memcpy(mask, &aw->v.a.mask, addrlen);
+}
+
+// Get interface name from addr_wrap (dynamic interface mode).
+static const char* get_addr_wrap_ifname(const struct pf_addr_wrap *aw) {
+	return aw->v.ifname;
 }
 
 // Get table name from addr_wrap.
@@ -764,6 +781,18 @@ func setAddrWrapTable(aw *C.struct_pf_addr_wrap, name string) {
 	cstr := C.CString(name)
 	defer C.free(unsafe.Pointer(cstr))
 	C.set_addr_wrap_table(aw, cstr)
+}
+
+// setAddrWrapDyn sets a pf_addr_wrap to DYNIFTL type.
+func setAddrWrapDyn(aw *C.struct_pf_addr_wrap, ifname string, flags IfaceFlags) {
+	cstr := C.CString(ifname)
+	defer C.free(unsafe.Pointer(cstr))
+	C.set_addr_wrap_dyn(aw, cstr, C.u_int8_t(flags))
+}
+
+// getAddrWrapIfname extracts the interface name of a DYNIFTL pf_addr_wrap.
+func getAddrWrapIfname(aw *C.struct_pf_addr_wrap) string {
+	return C.GoString(C.get_addr_wrap_ifname(aw))
 }
 
 // getAddrWrapAddr extracts address bytes from a pf_addr_wrap.

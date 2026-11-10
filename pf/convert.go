@@ -10,6 +10,10 @@ package pf
 #include <net/if.h>
 #include <net/pfvar.h>
 #include <netinet/in.h>
+#include <netinet/in_systm.h>
+#include <netinet/ip.h>
+#include <netinet/ip_icmp.h>
+#include <netinet/icmp6.h>
 #include <string.h>
 */
 import "C"
@@ -29,6 +33,12 @@ var (
 	_ = [1]int{}[C.PF_BINAT-pfActBINAT]
 	_ = [1]int{}[C.PF_RDR-pfActRDR]
 
+	_ = [1]int{}[C.PFRULE_RETURNRST-pfRuleReturnRST]
+	_ = [1]int{}[C.PFRULE_RETURNICMP-pfRuleReturnICMP]
+	_ = [1]int{}[C.PFRULE_RETURN-pfRuleReturn]
+	_ = [1]int{}[(C.ICMP_UNREACH<<8|C.ICMP_UNREACH_PORT)-returnICMPDefault]
+	_ = [1]int{}[(C.ICMP6_DST_UNREACH<<8|C.ICMP6_DST_UNREACH_NOPORT)-returnICMP6Default]
+
 	_ = [1]int{}[C.IFNAMSIZ-ifNameSize]
 	_ = [1]int{}[C.PF_RULE_LABEL_SIZE-ruleLabelSize]
 	_ = [1]int{}[C.PF_TABLE_NAME_SIZE-tableNameSize]
@@ -46,12 +56,20 @@ func ruleToC(r Rule, anchor string) (C.struct_pfioc_rule, error) {
 
 	rule := &pr.rule
 
+	// -1 is "no rtable option", as pfctl's filter_opts.rtableid = -1; the
+	// zeroed struct would otherwise mean `rtable 0`.
+	rule.rtableid = C.int(rtableToKernel(r.Rtable))
+
 	// Action
 	switch r.Action {
 	case ActionPass:
 		rule.action = C.PF_PASS
 	case ActionBlock:
 		rule.action = C.PF_DROP
+		flag, icmp, icmp6 := blockPolicyToKernel(r.BlockPolicy)
+		rule.rule_flag = C.u_int32_t(flag)
+		rule.return_icmp = C.u_int16_t(icmp)
+		rule.return_icmp6 = C.u_int16_t(icmp6)
 	case ActionMatch:
 		rule.action = C.PF_MATCH
 	}
@@ -74,14 +92,25 @@ func ruleToC(r Rule, anchor string) (C.struct_pfioc_rule, error) {
 	// Protocol
 	rule.proto = C.u_int8_t(r.Protocol)
 
-	// Address family
-	rule.af = C.sa_family_t(r.AF)
+	// Address family: inferred from the addresses, as pfctl does.
+	af, err := effectiveAF(r)
+	if err != nil {
+		return pr, err
+	}
+	rule.af = C.sa_family_t(af)
 
 	// Source address
 	setRuleAddr(&rule.src, r.Source, r.SourcePort)
 
 	// Destination address
 	setRuleAddr(&rule.dst, r.Destination, r.DestinationPort)
+
+	// TCP flags and ICMP type/code (pf stores type+1 and code+1; 0 = any).
+	rule.flags = C.u_int8_t(r.TCPFlags.Check)
+	rule.flagset = C.u_int8_t(r.TCPFlags.Mask)
+	tc := icmpTypeCodeToKernel(r.ICMPType, r.ICMPCode)
+	rule._type = C.u_int8_t(tc[0])
+	rule.code = C.u_int8_t(tc[1])
 
 	// Flags
 	if r.Quick {
@@ -108,7 +137,9 @@ func setRuleAddr(ra *C.struct_pf_rule_addr, addr Address, port PortMatcher) {
 		ra.neg = 1
 	}
 
-	if addr.Any {
+	if addr.Interface != "" {
+		setAddrWrapDyn(&ra.addr, addr.Interface, addr.IfaceFlags)
+	} else if addr.Any {
 		// ADDRMASK with zeros = any
 		setAddrWrapAddrmask(&ra.addr, nil, nil)
 	} else if addr.Table != "" {
@@ -175,9 +206,11 @@ func ruleFromC(pr *C.struct_pfioc_rule) Rule {
 		r.Action = ActionPass
 	case C.PF_DROP:
 		r.Action = ActionBlock
+		r.BlockPolicy = blockPolicyFromKernel(uint32(rule.rule_flag))
 	case C.PF_MATCH:
 		r.Action = ActionMatch
 	}
+	r.Rtable = rtableFromKernel(int32(rule.rtableid))
 
 	switch rule.direction {
 	case C.PF_IN:
@@ -200,6 +233,9 @@ func ruleFromC(pr *C.struct_pfioc_rule) Rule {
 	r.KeepState = rule.keep_state != 0
 	r.Label = strings.TrimRight(C.GoString(&rule.label[0]), "\x00")
 	r.Anchor = strings.TrimRight(C.GoString(&pr.anchor[0]), "\x00")
+	r.AnchorCall = strings.TrimRight(C.GoString(&pr.anchor_call[0]), "\x00")
+	r.TCPFlags = TCPFlags{Check: uint8(rule.flags), Mask: uint8(rule.flagset)}
+	r.ICMPType, r.ICMPCode = icmpTypeCodeFromKernel(uint8(rule._type), uint8(rule.code))
 
 	// Per-rule statistics
 	r.Evaluations = uint64(rule.evaluations)
@@ -250,6 +286,9 @@ func addrFromC(ra *C.struct_pf_rule_addr) Address {
 		}
 	case C.PF_ADDR_TABLE:
 		addr.Table = getAddrWrapTblname(&ra.addr)
+	case C.PF_ADDR_DYNIFTL:
+		addr.Interface = getAddrWrapIfname(&ra.addr)
+		addr.IfaceFlags = IfaceFlags(ra.addr.iflags)
 	}
 
 	return addr

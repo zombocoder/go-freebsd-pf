@@ -76,6 +76,24 @@ func (c *Client) ListRules(query RuleQuery) ([]Rule, error) {
 	return rules, nil
 }
 
+// MainRulesetHasAnchor reports whether the main filter ruleset contains an
+// `anchor` rule calling path. path is compared with the kernel's spelling of
+// the call (Rule.AnchorCall), ignoring one leading "/": "microvm-runner/*"
+// matches `anchor "microvm-runner/*"` and `anchor "/microvm-runner/*"`.
+// "microvm-runner" and "microvm-runner/*" are different calls. nat-anchor, rdr-anchor and binat-anchor rules are not looked at.
+func (c *Client) MainRulesetHasAnchor(path string) (bool, error) {
+	rules, err := c.ListRules(RuleQuery{RuleSet: RuleSetFilter})
+	if err != nil {
+		return false, err
+	}
+	for _, r := range rules {
+		if sameAnchorCall(r.AnchorCall, path) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // AddRule adds a single rule to PF outside a transaction.
 //
 // Deprecated: the kernel only accepts DIOCADDRULE with the ticket of an

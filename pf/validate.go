@@ -32,6 +32,23 @@ func ValidateRule(r Rule) error {
 		return fmt.Errorf("%w: destination port: %v", ErrInvalidRule, err)
 	}
 
+	if err := validateBlockPolicy(r); err != nil {
+		return err
+	}
+	if err := validateRtable(r.Rtable); err != nil {
+		return err
+	}
+
+	if _, err := effectiveAF(r); err != nil {
+		return err
+	}
+	if err := validateTCPFlags(r); err != nil {
+		return err
+	}
+	if err := validateICMP(r); err != nil {
+		return err
+	}
+
 	if r.Label != "" && len(r.Label) >= 64 {
 		return fmt.Errorf("%w: label too long (max 63 chars)", ErrInvalidRule)
 	}
@@ -58,6 +75,9 @@ func validateInterfaceName(name string) error {
 }
 
 func validateAddress(addr Address) error {
+	if addr.Interface != "" || addr.IfaceFlags != 0 {
+		return validateDynAddress(addr)
+	}
 	if addr.Any {
 		return nil
 	}
