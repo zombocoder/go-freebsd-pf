@@ -48,6 +48,8 @@ func (c *Client) ListRules(query RuleQuery) ([]Rule, error) {
 		}
 		gr.ticket = ticket
 		gr.nr = C.u_int32_t(i)
+		// Same ruleset selector as DIOCGETRULES, so the ticket matches.
+		gr.rule.action = C.u_int8_t(query.RuleSet)
 
 		if err := ioctlGetRule(c.fd, &gr); err != nil {
 			return rules, err

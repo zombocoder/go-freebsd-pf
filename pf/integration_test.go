@@ -51,6 +51,7 @@ func TestStatus(t *testing.T) {
 	}
 	t.Logf("PF running=%v since=%v debug=%v states=%d",
 		status.Running, status.Since, status.Debug, status.States)
+	t.Logf("ioctls in this build: %v", ioctlMechanisms())
 }
 
 func TestEnableDisable(t *testing.T) {
